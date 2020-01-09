@@ -1,8 +1,8 @@
-From 9ad5a410879f95ec4d08ee0c81dcf3f8608e71f7 Mon Sep 17 00:00:00 2001
+From 9955fbadccb21f4cea008022c3031d01c50991da Mon Sep 17 00:00:00 2001
 From: Lars Kellogg-Stedman <lars@redhat.com>
 Date: Mon, 23 Jun 2014 13:15:54 -0400
-Subject: [PATCH 4/6] fix typo in settings.py preventing metadata being fecthed
- in ec2
+Subject: [PATCH] fix typo in settings.py preventing metadata being fecthed in
+ ec2
 
 ---
  cloudinit/settings.py | 2 +-
@@ -21,6 +21,3 @@ index 37d4958..5efcb0b 100644
          'Ec2',
          'CloudSigma',
          'CloudStack',
--- 
-2.5.0
-

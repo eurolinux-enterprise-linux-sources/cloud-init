@@ -1,0 +1,125 @@
+From 835397f88692ce5f8c674b990ed6ac63b85319dc Mon Sep 17 00:00:00 2001
+From: Lars Kellogg-Stedman <lars@redhat.com>
+Date: Mon, 23 Jun 2014 13:13:24 -0400
+Subject: [PATCH] packaging: configs, docs, and path changes for rhel
+
+---
+ cloudinit/config/cc_keys_to_console.py |  2 +-
+ rhel/README.rhel                       |  5 +++
+ rhel/cloud.cfg                         | 59 ++++++++++++++++++++++++++++++++++
+ setup.py                               |  4 +--
+ 4 files changed, 67 insertions(+), 3 deletions(-)
+ create mode 100644 rhel/README.rhel
+ create mode 100644 rhel/cloud.cfg
+
+diff --git a/cloudinit/config/cc_keys_to_console.py b/cloudinit/config/cc_keys_to_console.py
+index ed7af69..e8bc33a 100644
+--- a/cloudinit/config/cc_keys_to_console.py
++++ b/cloudinit/config/cc_keys_to_console.py
+@@ -26,7 +26,7 @@ from cloudinit import util
+ frequency = PER_INSTANCE
+ 
+ # This is a tool that cloud init provides
+-HELPER_TOOL = '/usr/lib/cloud-init/write-ssh-key-fingerprints'
++HELPER_TOOL = '/usr/libexec/cloud-init/write-ssh-key-fingerprints'
+ 
+ 
+ def handle(name, cfg, _cloud, log, _args):
+diff --git a/rhel/README.rhel b/rhel/README.rhel
+new file mode 100644
+index 0000000..aa29630
+--- /dev/null
++++ b/rhel/README.rhel
+@@ -0,0 +1,5 @@
++The following cloud-init modules are currently unsupported on this OS:
++ - apt_update_upgrade ('apt_update', 'apt_upgrade', 'apt_mirror', 'apt_preserve_sources_list', 'apt_old_mirror', 'apt_sources', 'debconf_selections', 'packages' options)
++ - byobu ('byobu_by_default' option)
++ - chef
++ - grub_dpkg
+diff --git a/rhel/cloud.cfg b/rhel/cloud.cfg
+new file mode 100644
+index 0000000..d2fd540
+--- /dev/null
++++ b/rhel/cloud.cfg
+@@ -0,0 +1,59 @@
++users:
++ - default
++
++disable_root: 1
++ssh_pwauth:   0
++
++locale_configfile: /etc/sysconfig/i18n
++mount_default_fields: [~, ~, 'auto', 'defaults,nofail', '0', '2']
++resize_rootfs_tmp: /dev
++ssh_deletekeys:   0
++ssh_genkeytypes:  ~
++syslog_fix_perms: ~
++
++cloud_init_modules:
++ - bootcmd
++ - write-files
++ - resizefs
++ - set_hostname
++ - update_hostname
++ - update_etc_hosts
++ - rsyslog
++ - users-groups
++ - ssh
++
++cloud_config_modules:
++ - mounts
++ - locale
++ - set-passwords
++ - timezone
++ - yum-add-repo
++ - package-update-upgrade-install
++ - puppet
++ - chef
++ - salt-minion
++ - mcollective
++ - disable-ec2-metadata
++ - runcmd
++
++cloud_final_modules:
++ - rightscale_userdata
++ - scripts-per-once
++ - scripts-per-boot
++ - scripts-per-instance
++ - scripts-user
++ - ssh-authkey-fingerprints
++ - keys-to-console
++ - phone-home
++ - final-message
++
++system_info:
++  distro: rhel
++  default_user:
++    name: cloud-user
++  paths:
++    cloud_dir: /var/lib/cloud
++    templates_dir: /etc/cloud/templates
++  ssh_svcname: sshd
++
++# vim:syntax=yaml
+diff --git a/setup.py b/setup.py
+index 9118e5f..9eb83aa 100755
+--- a/setup.py
++++ b/setup.py
+@@ -45,7 +45,7 @@ INITSYS_FILES = {
+ INITSYS_ROOTS = {
+     'sysvinit': '/etc/rc.d/init.d',
+     'sysvinit_deb': '/etc/init.d',
+-    'systemd': '/etc/systemd/system/',
++    'systemd': '/usr/lib/systemd/system/',
+     'upstart': '/etc/init/',
+ }
+ INITSYS_TYPES = sorted(list(INITSYS_ROOTS.keys()))
+@@ -123,7 +123,7 @@ setuptools.setup(name='cloud-init',
+                   ('/etc/cloud/cloud.cfg.d', glob('config/cloud.cfg.d/*')),
+                   ('/etc/cloud/templates', glob('templates/*')),
+                   ('/usr/share/cloud-init', []),
+-                  ('/usr/lib/cloud-init',
++                  ('/usr/libexec/cloud-init',
+                     ['tools/uncloud-init',
+                      'tools/write-ssh-key-fingerprints']),
+                   ('/usr/share/doc/cloud-init',

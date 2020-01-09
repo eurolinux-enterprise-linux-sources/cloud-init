@@ -1,0 +1,448 @@
+From 63fd29670e01833c63303d4988f1a74a12b16c6f Mon Sep 17 00:00:00 2001
+From: Ben Howard <ben.howard@canonical.com>
+Date: Wed, 14 Jan 2015 12:24:09 -0700
+Subject: [PATCH 4/5] Drop reliance on dmidecode executable.
+
+(cherry picked from commit 28c8aa7270a04adea69065477b13cfc0dd244acc)
+
+Resolves: rhbz#1495471
+Signed-off-by: Ryan McCabe <rmccabe@redhat.com>
+---
+ cloudinit/sources/DataSourceAltCloud.py          | 27 +++-----
+ cloudinit/sources/DataSourceCloudSigma.py        | 23 +++++++
+ cloudinit/sources/DataSourceSmartOS.py           | 25 ++------
+ cloudinit/util.py                                | 78 ++++++++++++++++++++++++
+ tests/unittests/test_datasource/test_altcloud.py | 66 ++++++++------------
+ tests/unittests/test_util.py                     | 28 +++++++++
+ 6 files changed, 169 insertions(+), 78 deletions(-)
+
+diff --git a/cloudinit/sources/DataSourceAltCloud.py b/cloudinit/sources/DataSourceAltCloud.py
+index 1f3c8954..ed4c6a52 100644
+--- a/cloudinit/sources/DataSourceAltCloud.py
++++ b/cloudinit/sources/DataSourceAltCloud.py
+@@ -40,7 +40,6 @@ LOG = logging.getLogger(__name__)
+ CLOUD_INFO_FILE = '/etc/sysconfig/cloud-info'
+ 
+ # Shell command lists
+-CMD_DMI_SYSTEM = ['/usr/sbin/dmidecode', '--string', 'system-product-name']
+ CMD_PROBE_FLOPPY = ['/sbin/modprobe', 'floppy']
+ CMD_UDEVADM_SETTLE = ['/sbin/udevadm', 'settle', '--timeout=5']
+ 
+@@ -100,11 +99,7 @@ class DataSourceAltCloud(sources.DataSource):
+         '''
+         Description:
+             Get the type for the cloud back end this instance is running on
+-            by examining the string returned by:
+-            dmidecode --string system-product-name
+-
+-            On VMWare/vSphere dmidecode returns: RHEV Hypervisor
+-            On VMWare/vSphere dmidecode returns: VMware Virtual Platform
++            by examining the string returned by reading the dmi data.
+ 
+         Input:
+             None
+@@ -117,26 +112,20 @@ class DataSourceAltCloud(sources.DataSource):
+ 
+         uname_arch = os.uname()[4]
+         if uname_arch.startswith("arm") or uname_arch == "aarch64":
+-            # Disabling because dmidecode in CMD_DMI_SYSTEM crashes kvm process
++            # Disabling because dmi data is not available on ARM processors
+             LOG.debug("Disabling AltCloud datasource on arm (LP: #1243287)")
+             return 'UNKNOWN'
+ 
+-        cmd = CMD_DMI_SYSTEM
+-        try:
+-            (cmd_out, _err) = util.subp(cmd)
+-        except ProcessExecutionError, _err:
+-            LOG.debug(('Failed command: %s\n%s') % \
+-                (' '.join(cmd), _err.message))
+-            return 'UNKNOWN'
+-        except OSError, _err:
+-            LOG.debug(('Failed command: %s\n%s') % \
+-                (' '.join(cmd), _err.message))
++        system_name = util.read_dmi_data("system-product-name")
++        if not system_name:
+             return 'UNKNOWN'
+ 
+-        if cmd_out.upper().startswith('RHEV'):
++        sys_name = system_name.upper()
++
++        if sys_name.startswith('RHEV'):
+             return 'RHEV'
+ 
+-        if cmd_out.upper().startswith('VMWARE'):
++        if sys_name.startswith('VMWARE'):
+             return 'VSPHERE'
+ 
+         return 'UNKNOWN'
+diff --git a/cloudinit/sources/DataSourceCloudSigma.py b/cloudinit/sources/DataSourceCloudSigma.py
+index e1c7e566..82e73c05 100644
+--- a/cloudinit/sources/DataSourceCloudSigma.py
++++ b/cloudinit/sources/DataSourceCloudSigma.py
+@@ -40,6 +40,29 @@ class DataSourceCloudSigma(sources.DataSource):
+         self.ssh_public_key = ''
+         sources.DataSource.__init__(self, sys_cfg, distro, paths)
+ 
++    def is_running_in_cloudsigma(self):
++        """
++        Uses dmi data to detect if this instance of cloud-init is running
++        in the CloudSigma's infrastructure.
++        """
++        uname_arch = os.uname()[4]
++        if uname_arch.startswith("arm") or uname_arch == "aarch64":
++            # Disabling because dmi data on ARM processors
++            LOG.debug("Disabling CloudSigma datasource on arm (LP: #1243287)")
++            return False
++
++        LOG.debug("determining hypervisor product name via dmi data")
++        sys_product_name = util.read_dmi_data("system-product-name")
++        if not sys_product_name:
++            LOG.warn("failed to get hypervisor product name via dmi data")
++            return False
++        else:
++            LOG.debug("detected hypervisor as {}".format(sys_product_name))
++            return 'cloudsigma' in sys_product_name.lower()
++
++        LOG.warn("failed to query dmi data for system product name")
++        return False
++
+     def get_data(self):
+         """
+         Metadata is the whole server context and /meta/cloud-config is used
+diff --git a/cloudinit/sources/DataSourceSmartOS.py b/cloudinit/sources/DataSourceSmartOS.py
+index 7c1eb09a..c925bd04 100644
+--- a/cloudinit/sources/DataSourceSmartOS.py
++++ b/cloudinit/sources/DataSourceSmartOS.py
+@@ -352,26 +352,13 @@ def query_data(noun, seed_device, seed_timeout, strip=False, default=None,
+ 
+ 
+ def dmi_data():
+-    sys_uuid, sys_type = None, None
+-    dmidecode_path = util.which('dmidecode')
+-    if not dmidecode_path:
+-        return False
++    sys_uuid = util.read_dmi_data("system-uuid")
++    sys_type = util.read_dmi_data("system-product-name")
++
++    if not sys_uuid or not sys_type:
++        return None
+ 
+-    sys_uuid_cmd = [dmidecode_path, "-s", "system-uuid"]
+-    try:
+-        LOG.debug("Getting hostname from dmidecode")
+-        (sys_uuid, _err) = util.subp(sys_uuid_cmd)
+-    except Exception as e:
+-        util.logexc(LOG, "Failed to get system UUID", e)
+-
+-    sys_type_cmd = [dmidecode_path, "-s", "system-product-name"]
+-    try:
+-        LOG.debug("Determining hypervisor product name via dmidecode")
+-        (sys_type, _err) = util.subp(sys_type_cmd)
+-    except Exception as e:
+-        util.logexc(LOG, "Failed to get system UUID", e)
+-
+-    return (sys_uuid.lower().strip(), sys_type.strip())
++    return (sys_uuid.lower(), sys_type)
+ 
+ 
+ def write_boot_content(content, content_f, link=None, shebang=False,
+diff --git a/cloudinit/util.py b/cloudinit/util.py
+index 06039ee2..b23fd4b9 100644
+--- a/cloudinit/util.py
++++ b/cloudinit/util.py
+@@ -74,6 +74,9 @@ FN_ALLOWED = ('_-.()' + string.digits + string.ascii_letters)
+ # Helper utils to see if running in a container
+ CONTAINER_TESTS = ['running-in-container', 'lxc-is-container']
+ 
++# Path for DMI Data
++DMI_SYS_PATH = "/sys/class/dmi/id"
++
+ 
+ class ProcessExecutionError(IOError):
+ 
+@@ -1926,3 +1929,78 @@ def pathprefix2dict(base, required=None, optional=None, delim=os.path.sep):
+         raise ValueError("Missing required files: %s", ','.join(missing))
+ 
+     return ret
++
++
++def read_meminfo(meminfo="/proc/meminfo", raw=False):
++    # read a /proc/meminfo style file and return
++    # a dict with 'total', 'free', and 'available'
++    mpliers = {'kB': 2 ** 10, 'mB': 2 ** 20, 'B': 1, 'gB': 2 ** 30}
++    kmap = {'MemTotal:': 'total', 'MemFree:': 'free',
++            'MemAvailable:': 'available'}
++    ret = {}
++    for line in load_file(meminfo).splitlines():
++        try:
++            key, value, unit = line.split()
++        except ValueError:
++            key, value = line.split()
++            unit = 'B'
++        if raw:
++            ret[key] = int(value) * mpliers[unit]
++        elif key in kmap:
++            ret[kmap[key]] = int(value) * mpliers[unit]
++
++    return ret
++
++
++def human2bytes(size):
++    """Convert human string or integer to size in bytes
++      10M => 10485760
++      .5G => 536870912
++    """
++    size_in = size
++    if size.endswith("B"):
++        size = size[:-1]
++
++    mpliers = {'B': 1, 'K': 2 ** 10, 'M': 2 ** 20, 'G': 2 ** 30, 'T': 2 ** 40}
++
++    num = size
++    mplier = 'B'
++    for m in mpliers:
++        if size.endswith(m):
++            mplier = m
++            num = size[0:-len(m)]
++
++    try:
++        num = float(num)
++    except ValueError:
++        raise ValueError("'%s' is not valid input." % size_in)
++
++    if num < 0:
++        raise ValueError("'%s': cannot be negative" % size_in)
++
++    return int(num * mpliers[mplier])
++
++
++def read_dmi_data(key):
++    """
++    Reads dmi data with from /sys/class/dmi/id
++    """
++
++    dmi_key = "{}/{}".format(DMI_SYS_PATH, key)
++    LOG.debug("querying dmi data {}".format(dmi_key))
++    try:
++        if not os.path.exists(dmi_key):
++            LOG.debug("did not find {}".format(dmi_key))
++            return None
++
++        key_data = load_file(dmi_key)
++        if not key_data:
++            LOG.debug("{} did not return any data".format(key))
++            return None
++
++        LOG.debug("dmi data {} returned {}".format(dmi_key, key_data))
++        return key_data.strip()
++
++    except Exception as e:
++        logexc(LOG, "failed read of {}".format(dmi_key), e)
++        return None
+diff --git a/tests/unittests/test_datasource/test_altcloud.py b/tests/unittests/test_datasource/test_altcloud.py
+index eaaa90e6..1a48ee5f 100644
+--- a/tests/unittests/test_datasource/test_altcloud.py
++++ b/tests/unittests/test_datasource/test_altcloud.py
+@@ -26,6 +26,7 @@ import shutil
+ import tempfile
+ 
+ from cloudinit import helpers
++from cloudinit import util
+ from unittest import TestCase
+ 
+ # Get the cloudinit.sources.DataSourceAltCloud import items needed.
+@@ -98,6 +99,16 @@ def _remove_user_data_files(mount_dir,
+             pass
+ 
+ 
++def _dmi_data(expected):
++    '''
++    Spoof the data received over DMI
++    '''
++    def _data(key):
++        return expected
++
++    return _data
++
++
+ class TestGetCloudType(TestCase):
+     '''
+     Test to exercise method: DataSourceAltCloud.get_cloud_type()
+@@ -106,24 +117,22 @@ class TestGetCloudType(TestCase):
+     def setUp(self):
+         '''Set up.'''
+         self.paths = helpers.Paths({'cloud_dir': '/tmp'})
++        self.dmi_data = util.read_dmi_data
+         # We have a different code path for arm to deal with LP1243287
+         # We have to switch arch to x86_64 to avoid test failure
+         force_arch('x86_64')
+ 
+     def tearDown(self):
+         # Reset
+-        cloudinit.sources.DataSourceAltCloud.CMD_DMI_SYSTEM = \
+-            ['dmidecode', '--string', 'system-product-name']
+-        # Return back to original arch
++        util.read_dmi_data = self.dmi_data
+         force_arch()
+ 
+     def test_rhev(self):
+         '''
+         Test method get_cloud_type() for RHEVm systems.
+-        Forcing dmidecode return to match a RHEVm system: RHEV Hypervisor
++        Forcing read_dmi_data return to match a RHEVm system: RHEV Hypervisor
+         '''
+-        cloudinit.sources.DataSourceAltCloud.CMD_DMI_SYSTEM = \
+-            ['echo', 'RHEV Hypervisor']
++        util.read_dmi_data = _dmi_data('RHEV')
+         dsrc = DataSourceAltCloud({}, None, self.paths)
+         self.assertEquals('RHEV', \
+             dsrc.get_cloud_type())
+@@ -131,10 +140,9 @@ class TestGetCloudType(TestCase):
+     def test_vsphere(self):
+         '''
+         Test method get_cloud_type() for vSphere systems.
+-        Forcing dmidecode return to match a vSphere system: RHEV Hypervisor
++        Forcing read_dmi_data return to match a vSphere system: RHEV Hypervisor
+         '''
+-        cloudinit.sources.DataSourceAltCloud.CMD_DMI_SYSTEM = \
+-            ['echo', 'VMware Virtual Platform']
++        util.read_dmi_data = _dmi_data('VMware Virtual Platform')
+         dsrc = DataSourceAltCloud({}, None, self.paths)
+         self.assertEquals('VSPHERE', \
+             dsrc.get_cloud_type())
+@@ -142,30 +150,9 @@ class TestGetCloudType(TestCase):
+     def test_unknown(self):
+         '''
+         Test method get_cloud_type() for unknown systems.
+-        Forcing dmidecode return to match an unrecognized return.
+-        '''
+-        cloudinit.sources.DataSourceAltCloud.CMD_DMI_SYSTEM = \
+-            ['echo', 'Unrecognized Platform']
+-        dsrc = DataSourceAltCloud({}, None, self.paths)
+-        self.assertEquals('UNKNOWN', \
+-            dsrc.get_cloud_type())
+-
+-    def test_exception1(self):
+-        '''
+-        Test method get_cloud_type() where command dmidecode fails.
+-        '''
+-        cloudinit.sources.DataSourceAltCloud.CMD_DMI_SYSTEM = \
+-            ['ls', 'bad command']
+-        dsrc = DataSourceAltCloud({}, None, self.paths)
+-        self.assertEquals('UNKNOWN', \
+-            dsrc.get_cloud_type())
+-
+-    def test_exception2(self):
+-        '''
+-        Test method get_cloud_type() where command dmidecode is not available.
++        Forcing read_dmi_data return to match an unrecognized return.
+         '''
+-        cloudinit.sources.DataSourceAltCloud.CMD_DMI_SYSTEM = \
+-            ['bad command']
++        util.read_dmi_data = _dmi_data('Unrecognized Platform')
+         dsrc = DataSourceAltCloud({}, None, self.paths)
+         self.assertEquals('UNKNOWN', \
+             dsrc.get_cloud_type())
+@@ -180,6 +167,7 @@ class TestGetDataCloudInfoFile(TestCase):
+         '''Set up.'''
+         self.paths = helpers.Paths({'cloud_dir': '/tmp'})
+         self.cloud_info_file = tempfile.mkstemp()[1]
++        self.dmi_data = util.read_dmi_data
+         cloudinit.sources.DataSourceAltCloud.CLOUD_INFO_FILE = \
+             self.cloud_info_file
+ 
+@@ -192,6 +180,7 @@ class TestGetDataCloudInfoFile(TestCase):
+         except OSError:
+             pass
+ 
++        util.read_dmi_data = self.dmi_data
+         cloudinit.sources.DataSourceAltCloud.CLOUD_INFO_FILE = \
+             '/etc/sysconfig/cloud-info'
+ 
+@@ -243,6 +232,7 @@ class TestGetDataNoCloudInfoFile(TestCase):
+     def setUp(self):
+         '''Set up.'''
+         self.paths = helpers.Paths({'cloud_dir': '/tmp'})
++        self.dmi_data = util.read_dmi_data
+         cloudinit.sources.DataSourceAltCloud.CLOUD_INFO_FILE = \
+             'no such file'
+         # We have a different code path for arm to deal with LP1243287
+@@ -253,16 +243,14 @@ class TestGetDataNoCloudInfoFile(TestCase):
+         # Reset
+         cloudinit.sources.DataSourceAltCloud.CLOUD_INFO_FILE = \
+             '/etc/sysconfig/cloud-info'
+-        cloudinit.sources.DataSourceAltCloud.CMD_DMI_SYSTEM = \
+-            ['dmidecode', '--string', 'system-product-name']
++        util.read_dmi_data = self.dmi_data
+         # Return back to original arch
+         force_arch()
+ 
+     def test_rhev_no_cloud_file(self):
+         '''Test No cloud info file module get_data() forcing RHEV.'''
+ 
+-        cloudinit.sources.DataSourceAltCloud.CMD_DMI_SYSTEM = \
+-            ['echo', 'RHEV Hypervisor']
++        util.read_dmi_data = _dmi_data('RHEV Hypervisor')
+         dsrc = DataSourceAltCloud({}, None, self.paths)
+         dsrc.user_data_rhevm = lambda: True
+         self.assertEquals(True, dsrc.get_data())
+@@ -270,8 +258,7 @@ class TestGetDataNoCloudInfoFile(TestCase):
+     def test_vsphere_no_cloud_file(self):
+         '''Test No cloud info file module get_data() forcing VSPHERE.'''
+ 
+-        cloudinit.sources.DataSourceAltCloud.CMD_DMI_SYSTEM = \
+-            ['echo', 'VMware Virtual Platform']
++        util.read_dmi_data = _dmi_data('VMware Virtual Platform')
+         dsrc = DataSourceAltCloud({}, None, self.paths)
+         dsrc.user_data_vsphere = lambda: True
+         self.assertEquals(True, dsrc.get_data())
+@@ -279,8 +266,7 @@ class TestGetDataNoCloudInfoFile(TestCase):
+     def test_failure_no_cloud_file(self):
+         '''Test No cloud info file module get_data() forcing unrecognized.'''
+ 
+-        cloudinit.sources.DataSourceAltCloud.CMD_DMI_SYSTEM = \
+-            ['echo', 'Unrecognized Platform']
++        util.read_dmi_data = _dmi_data('Unrecognized Platform')
+         dsrc = DataSourceAltCloud({}, None, self.paths)
+         self.assertEquals(False, dsrc.get_data())
+ 
+diff --git a/tests/unittests/test_util.py b/tests/unittests/test_util.py
+index 38ab0c96..9bfc98c1 100644
+--- a/tests/unittests/test_util.py
++++ b/tests/unittests/test_util.py
+@@ -307,4 +307,32 @@ class TestMountinfoParsing(helpers.ResourceUsingTestCase):
+         expected = ('none', 'tmpfs', '/run/lock')
+         self.assertEqual(expected, util.parse_mount_info('/run/lock', lines))
+ 
++
++class TestReadDMIData(helpers.FilesystemMockingTestCase):
++
++    def _patchIn(self, root):
++        self.restore()
++        self.patchOS(root)
++        self.patchUtils(root)
++
++    def _write_key(self, key, content):
++        new_root = self.makeDir()
++        self._patchIn(new_root)
++        util.ensure_dir(os.path.join('sys', 'class', 'dmi', 'id'))
++
++        dmi_key = "/sys/class/dmi/id/{}".format(key)
++        util.write_file(dmi_key, content)
++
++    def test_key(self):
++        key_content = "TEST-KEY-DATA"
++        self._write_key("key", key_content)
++        self.assertEquals(key_content, util.read_dmi_data("key"))
++
++    def test_key_mismatch(self):
++        self._write_key("test", "ABC")
++        self.assertNotEqual("123",  util.read_dmi_data("test"))
++
++    def test_no_key(self):
++        self.assertFalse(util.read_dmi_data("key"))
++
+ # vi: ts=4 expandtab
+-- 
+2.13.5
+

@@ -1,0 +1,136 @@
+From 8efe7a815b199c113b50980317452c29f1b2c761 Mon Sep 17 00:00:00 2001
+From: Junjie Wang <jingni.wjj@alibaba-inc.com>
+Date: Fri, 21 Apr 2017 20:06:09 +0800
+Subject: [PATCH 3/5] AliYun: Enable platform identification and enable by
+ default.
+
+AliYun cloud platform is now identifying themselves by setting the dmi
+product id to the well known value "Alibaba Cloud ECS". The changes here
+identify that properly in tools/ds-identify and in the DataSourceAliYun.
+
+Since the 'get_data' for AliYun now identifies itself correctly, we can
+enable AliYun by default.
+
+LP: #1638931
+(cherry picked from commit 4a60af54957634920e84a928aa22b4fc9a6dfd11)
+
+Resolves: rhbz#1495471
+Signed-off-by: Ryan McCabe <rmccabe@redhat.com>
+---
+ cloudinit/settings.py                          |  1 +
+ cloudinit/sources/DataSourceAliYun.py          | 14 +++++++++++++-
+ cloudinit/sources/DataSourceEc2.py             |  7 +++++++
+ tests/unittests/test_datasource/test_aliyun.py | 18 ++++++++++++++++--
+ 4 files changed, 37 insertions(+), 3 deletions(-)
+
+diff --git a/cloudinit/settings.py b/cloudinit/settings.py
+index 5efcb0b0..04b93a51 100644
+--- a/cloudinit/settings.py
++++ b/cloudinit/settings.py
+@@ -38,6 +38,7 @@ CFG_BUILTIN = {
+         'MAAS',
+         'GCE',
+         'OpenStack',
++        'AliYun',
+         'Ec2',
+         'CloudSigma',
+         'CloudStack',
+diff --git a/cloudinit/sources/DataSourceAliYun.py b/cloudinit/sources/DataSourceAliYun.py
+index b85de21e..bc5b5300 100644
+--- a/cloudinit/sources/DataSourceAliYun.py
++++ b/cloudinit/sources/DataSourceAliYun.py
+@@ -4,8 +4,10 @@ import os
+ 
+ from cloudinit import sources
+ from cloudinit.sources import DataSourceEc2 as EC2
++from cloudinit import util
+ 
+ DEF_MD_VERSION = "2016-01-01"
++ALIYUN_PRODUCT = "Alibaba Cloud ECS"
+ 
+ 
+ class DataSourceAliYun(EC2.DataSourceEc2):
+@@ -24,7 +26,17 @@ class DataSourceAliYun(EC2.DataSourceEc2):
+ 
+     @property
+     def cloud_platform(self):
+-        return EC2.Platforms.ALIYUN
++        if self._cloud_platform is None:
++            if _is_aliyun():
++                self._cloud_platform = EC2.Platforms.ALIYUN
++            else:
++                self._cloud_platform = EC2.Platforms.NO_EC2_METADATA
++
++        return self._cloud_platform
++
++
++def _is_aliyun():
++    return util.read_dmi_data('system-product-name') == ALIYUN_PRODUCT
+ 
+ 
+ def parse_public_keys(public_keys):
+diff --git a/cloudinit/sources/DataSourceEc2.py b/cloudinit/sources/DataSourceEc2.py
+index 7f89c061..f417d8c4 100644
+--- a/cloudinit/sources/DataSourceEc2.py
++++ b/cloudinit/sources/DataSourceEc2.py
+@@ -43,7 +43,12 @@ class Platforms(object):
+     ALIYUN = "AliYun"
+     AWS = "AWS"
+     SEEDED = "Seeded"
++    # UNKNOWN indicates no positive id.  If strict_id is 'warn' or 'false',
++    # then an attempt at the Ec2 Metadata service will be made.
+     UNKNOWN = "Unknown"
++    # NO_EC2_METADATA indicates this platform does not have a Ec2 metadata
++    # service available. No attempt at the Ec2 Metadata service will be made.
++    NO_EC2_METADATA = "No-EC2-Metadata"
+ 
+ 
+ class DataSourceEc2(sources.DataSource):
+@@ -76,6 +81,8 @@ class DataSourceEc2(sources.DataSource):
+                   strict_mode, self.cloud_platform)
+         if strict_mode == "true" and self.cloud_platform == Platforms.UNKNOWN:
+             return False
++        elif self.cloud_platform == Platforms.NO_EC2_METADATA:
++            return False
+ 
+         try:
+             if not self.wait_for_metadata_service():
+diff --git a/tests/unittests/test_datasource/test_aliyun.py b/tests/unittests/test_datasource/test_aliyun.py
+index 6f1de072..57dc9bbe 100644
+--- a/tests/unittests/test_datasource/test_aliyun.py
++++ b/tests/unittests/test_datasource/test_aliyun.py
+@@ -109,15 +109,29 @@ class TestAliYunDatasource(test_helpers.HttprettyTestCase):
+         self.assertEqual(self.default_metadata['hostname'],
+                          self.ds.get_hostname())
+ 
++    @mock.patch("cloudinit.sources.DataSourceAliYun._is_aliyun")
+     @httpretty.activate
+-    def test_with_mock_server(self):
++    def test_with_mock_server(self, m_is_aliyun):
++        m_is_aliyun.return_value = True
+         self.regist_default_server()
+-        self.ds.get_data()
++        ret = self.ds.get_data()
++        self.assertEqual(True, ret)
++        self.assertEqual(1, m_is_aliyun.call_count)
+         self._test_get_data()
+         self._test_get_sshkey()
+         self._test_get_iid()
+         self._test_host_name()
+ 
++    @mock.patch("cloudinit.sources.DataSourceAliYun._is_aliyun")
++    @httpretty.activate
++    def test_returns_false_when_not_on_aliyun(self, m_is_aliyun):
++        """If is_aliyun returns false, then get_data should return False."""
++        m_is_aliyun.return_value = False
++        self.regist_default_server()
++        ret = self.ds.get_data()
++        self.assertEqual(1, m_is_aliyun.call_count)
++        self.assertEqual(False, ret)
++
+     def test_parse_public_keys(self):
+         public_keys = {}
+         self.assertEqual(ay.parse_public_keys(public_keys), [])
+-- 
+2.13.5
+

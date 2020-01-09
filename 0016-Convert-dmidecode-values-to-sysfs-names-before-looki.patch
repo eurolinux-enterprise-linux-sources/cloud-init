@@ -1,0 +1,256 @@
+From bb72c9a13fe19b01e624c74ded9ef154e2782fb5 Mon Sep 17 00:00:00 2001
+From: Daniel Watkins <daniel.watkins@canonical.com>
+Date: Wed, 4 Mar 2015 10:46:27 +0000
+Subject: [PATCH 2/2] Convert dmidecode values to sysfs names before looking
+ for them.
+
+dmidecode and /sys/class/dmi/id/* use different names for the same
+information.  This modified the logic in util.read_dmi_data to map from
+dmidecode names to sysfs names before looking in sysfs.
+
+(cherry picked from commit 8663b57ebba7aa4f6916f53e74df4f890bbc8b9a)
+
+Signed-off-by: Ryan McCabe <rmccabe@redhat.com>
+Resolves: rhbz#1495471
+---
+ cloudinit/util.py            | 66 +++++++++++++++++++++++--------
+ tests/unittests/test_util.py | 92 +++++++++++++++++++++++++-------------------
+ 2 files changed, 101 insertions(+), 57 deletions(-)
+
+diff --git a/cloudinit/util.py b/cloudinit/util.py
+index 58ee6e32..342763da 100644
+--- a/cloudinit/util.py
++++ b/cloudinit/util.py
+@@ -77,6 +77,28 @@ CONTAINER_TESTS = ['running-in-container', 'lxc-is-container']
+ # Path for DMI Data
+ DMI_SYS_PATH = "/sys/class/dmi/id"
+ 
++# dmidecode and /sys/class/dmi/id/* use different names for the same value,
++# this allows us to refer to them by one canonical name
++DMIDECODE_TO_DMI_SYS_MAPPING = {
++    'baseboard-asset-tag': 'board_asset_tag',
++    'baseboard-manufacturer': 'board_vendor',
++    'baseboard-product-name': 'board_name',
++    'baseboard-serial-number': 'board_serial',
++    'baseboard-version': 'board_version',
++    'bios-release-date': 'bios_date',
++    'bios-vendor': 'bios_vendor',
++    'bios-version': 'bios_version',
++    'chassis-asset-tag': 'chassis_asset_tag',
++    'chassis-manufacturer': 'chassis_vendor',
++    'chassis-serial-number': 'chassis_serial',
++    'chassis-version': 'chassis_version',
++    'system-manufacturer': 'sys_vendor',
++    'system-product-name': 'product_name',
++    'system-serial-number': 'product_serial',
++    'system-uuid': 'product_uuid',
++    'system-version': 'product_version',
++}
++
+ 
+ class ProcessExecutionError(IOError):
+ 
+@@ -1985,24 +2007,26 @@ def _read_dmi_syspath(key):
+     """
+     Reads dmi data with from /sys/class/dmi/id
+     """
+-
+-    dmi_key = "{0}/{1}".format(DMI_SYS_PATH, key)
+-    LOG.debug("querying dmi data {0}".format(dmi_key))
++    if key not in DMIDECODE_TO_DMI_SYS_MAPPING:
++        return None
++    mapped_key = DMIDECODE_TO_DMI_SYS_MAPPING[key]
++    dmi_key_path = "{0}/{1}".format(DMI_SYS_PATH, mapped_key)
++    LOG.debug("querying dmi data {0}".format(dmi_key_path))
+     try:
+-        if not os.path.exists(dmi_key):
+-            LOG.debug("did not find {0}".format(dmi_key))
++        if not os.path.exists(dmi_key_path):
++            LOG.debug("did not find {0}".format(dmi_key_path))
+             return None
+ 
+-        key_data = load_file(dmi_key)
++        key_data = load_file(dmi_key_path)
+         if not key_data:
+-            LOG.debug("{0} did not return any data".format(key))
++            LOG.debug("{0} did not return any data".format(dmi_key_path))
+             return None
+ 
+-        LOG.debug("dmi data {0} returned {1}".format(dmi_key, key_data))
++        LOG.debug("dmi data {0} returned {1}".format(dmi_key_path, key_data))
+         return key_data.strip()
+ 
+     except Exception as e:
+-        logexc(LOG, "failed read of {0}".format(dmi_key), e)
++        logexc(LOG, "failed read of {0}".format(dmi_key_path), e)
+         return None
+ 
+ 
+@@ -2014,20 +2038,29 @@ def _call_dmidecode(key, dmidecode_path):
+     try:
+         cmd = [dmidecode_path, "--string", key]
+         (result, _err) = subp(cmd)
+-        LOG.debug("dmidecode returned '{}' for '{}'".format(result, key))
++        LOG.debug("dmidecode returned '{0}' for '{1}'".format(result, key))
+         return result
+-    except OSError, _err:
+-        LOG.debug('failed dmidecode cmd: {}\n{}'.format(cmd, _err.message))
++    except (IOError, OSError) as _err:
++        LOG.debug('failed dmidecode cmd: {0}\n{1}'.format(cmd, _err.message))
+         return None
+ 
+ 
+ def read_dmi_data(key):
+     """
+-    Wrapper for reading DMI data. This tries to determine whether the DMI
+-    Data can be read directly, otherwise it will fallback to using dmidecode.
++    Wrapper for reading DMI data.
++
++    This will do the following (returning the first that produces a
++    result):
++        1) Use a mapping to translate `key` from dmidecode naming to
++           sysfs naming and look in /sys/class/dmi/... for a value.
++        2) Use `key` as a sysfs key directly and look in /sys/class/dmi/...
++        3) Fall-back to passing `key` to `dmidecode --string`.
++
++    If all of the above fail to find a value, None will be returned.
+     """
+-    if os.path.exists(DMI_SYS_PATH):
+-        return _read_dmi_syspath(key)
++    syspath_value = _read_dmi_syspath(key)
++    if syspath_value is not None:
++        return syspath_value
+ 
+     dmidecode_path = which('dmidecode')
+     if dmidecode_path:
+@@ -2035,5 +2068,4 @@ def read_dmi_data(key):
+ 
+     LOG.warn("did not find either path {} or dmidecode command".format(
+              DMI_SYS_PATH))
+-
+     return None
+diff --git a/tests/unittests/test_util.py b/tests/unittests/test_util.py
+index 6389e6ad..78149cba 100644
+--- a/tests/unittests/test_util.py
++++ b/tests/unittests/test_util.py
+@@ -1,7 +1,9 @@
+ # pylint: disable=C0301
+ # the mountinfo data lines are too long
+ import os
++import shutil
+ import stat
++import tempfile
+ import yaml
+ 
+ from mocker import MockerTestCase
+@@ -310,57 +312,67 @@ class TestMountinfoParsing(helpers.ResourceUsingTestCase):
+ 
+ class TestReadDMIData(helpers.FilesystemMockingTestCase):
+ 
+-    def _patchIn(self, root):
+-        self.restore()
+-        self.patchOS(root)
+-        self.patchUtils(root)
++    def setUp(self):
++        super(TestReadDMIData, self).setUp()
++        self.new_root = tempfile.mkdtemp()
++        self.addCleanup(shutil.rmtree, self.new_root)
++        self.patchOS(self.new_root)
++        self.patchUtils(self.new_root)
+ 
+-    def _write_key(self, key, content):
+-        """Mocks the sys path found on Linux systems."""
+-        new_root = self.makeDir()
+-        self._patchIn(new_root)
++    def _create_sysfs_parent_directory(self):
+         util.ensure_dir(os.path.join('sys', 'class', 'dmi', 'id'))
+ 
++    def _create_sysfs_file(self, key, content):
++        """Mocks the sys path found on Linux systems."""
++        self._create_sysfs_parent_directory()
+         dmi_key = "/sys/class/dmi/id/{0}".format(key)
+         util.write_file(dmi_key, content)
+ 
+-    def _no_syspath(self, key, content):
++    def _configure_dmidecode_return(self, key, content, error=None):
+         """
+         In order to test a missing sys path and call outs to dmidecode, this
+         function fakes the results of dmidecode to test the results.
+         """
+-        new_root = self.makeDir()
+-        self._patchIn(new_root)
+-        self.real_which = util.which
+-        self.real_subp = util.subp
+-
+-        def _which(key):
+-            return True
+-        util.which = _which
+-
+-        def _cdd(_key, error=None):
++        def _dmidecode_subp(cmd):
++            if cmd[-1] != key:
++                raise util.ProcessExecutionError()
+             return (content, error)
+-        util.subp = _cdd
+-
+-    def test_key(self):
+-        key_content = "TEST-KEY-DATA"
+-        self._write_key("key", key_content)
+-        self.assertEquals(key_content, util.read_dmi_data("key"))
+-
+-    def test_key_mismatch(self):
+-        self._write_key("test", "ABC")
+-        self.assertNotEqual("123", util.read_dmi_data("test"))
+-
+-    def test_no_key(self):
+-        self._no_syspath(None, None)
+-        self.assertFalse(util.read_dmi_data("key"))
+-
+-    def test_callout_dmidecode(self):
+-        """test to make sure that dmidecode is used when no syspath"""
+-        self._no_syspath("key", "stuff")
+-        self.assertEquals("stuff", util.read_dmi_data("key"))
+-        self._no_syspath("key", None)
+-        self.assertFalse(None, util.read_dmi_data("key"))
++
++        self.patched_funcs.enter_context(
++            mock.patch.object(util, 'which', lambda _: True))
++        self.patched_funcs.enter_context(
++            mock.patch.object(util, 'subp', _dmidecode_subp))
++
++    def patch_mapping(self, new_mapping):
++        self.patched_funcs.enter_context(
++            mock.patch('cloudinit.util.DMIDECODE_TO_DMI_SYS_MAPPING',
++                       new_mapping))
++
++    def test_sysfs_used_with_key_in_mapping_and_file_on_disk(self):
++        self.patch_mapping({'mapped-key': 'mapped-value'})
++        expected_dmi_value = 'sys-used-correctly'
++        self._create_sysfs_file('mapped-value', expected_dmi_value)
++        self._configure_dmidecode_return('mapped-key', 'wrong-wrong-wrong')
++        self.assertEqual(expected_dmi_value, util.read_dmi_data('mapped-key'))
++
++    def test_dmidecode_used_if_no_sysfs_file_on_disk(self):
++        self.patch_mapping({})
++        self._create_sysfs_parent_directory()
++        expected_dmi_value = 'dmidecode-used'
++        self._configure_dmidecode_return('use-dmidecode', expected_dmi_value)
++        self.assertEqual(expected_dmi_value,
++                         util.read_dmi_data('use-dmidecode'))
++
++    def test_none_returned_if_neither_source_has_data(self):
++        self.patch_mapping({})
++        self._configure_dmidecode_return('key', 'value')
++        self.assertEqual(None, util.read_dmi_data('expect-fail'))
++
++    def test_none_returned_if_dmidecode_not_in_path(self):
++        self.patched_funcs.enter_context(
++            mock.patch.object(util, 'which', lambda _: False))
++        self.patch_mapping({})
++        self.assertEqual(None, util.read_dmi_data('expect-fail'))
+ 
+ 
+ # vi: ts=4 expandtab
+-- 
+2.13.5
+

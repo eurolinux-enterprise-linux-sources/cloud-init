@@ -1,0 +1,52 @@
+From e2bb164f9f6bbf2bdb36ca7ee6758a0534f540dc Mon Sep 17 00:00:00 2001
+From: Joshua Harlow <harlowja@gmail.com>
+Date: Mon, 16 May 2016 16:08:19 -0700
+Subject: [PATCH] Fix slow tests
+
+Timeouts and retries were triggering so make it so
+that tests do not use the typical timesouts and retries
+so that the tests finish faster.
+
+(cherry picked from commit f2665c246a3e6dec55064eced09919d912ae0e52)
+Resolves: rhbz#1409951
+---
+ cloudinit/sources/DataSourceOpenStack.py | 12 ++++++++----
+ 1 file changed, 8 insertions(+), 4 deletions(-)
+
+diff --git a/cloudinit/sources/DataSourceOpenStack.py b/cloudinit/sources/DataSourceOpenStack.py
+index 27a534c..94e0dd4 100644
+--- a/cloudinit/sources/DataSourceOpenStack.py
++++ b/cloudinit/sources/DataSourceOpenStack.py
+@@ -107,7 +107,7 @@ class DataSourceOpenStack(openstack.SourceMixin, sources.DataSource):
+         self.metadata_address = url2base.get(avail_url)
+         return bool(avail_url)
+ 
+-    def get_data(self):
++    def get_data(self, retries=5, timeout=5):
+         try:
+             if not self.wait_for_metadata_service():
+                 return False
+@@ -120,7 +120,9 @@ class DataSourceOpenStack(openstack.SourceMixin, sources.DataSource):
+                                     read_metadata_service,
+                                     args=[self.metadata_address],
+                                     kwargs={'ssl_details': self.ssl_details,
+-                                            'version': openstack.OS_HAVANA})
++                                            'version': openstack.OS_HAVANA,
++                                            'retries': retries,
++                                            'timeout': timeout})
+         except openstack.NonReadable:
+             return False
+         except (openstack.BrokenMetadata, IOError):
+@@ -154,8 +156,10 @@ class DataSourceOpenStack(openstack.SourceMixin, sources.DataSource):
+         return True
+ 
+ 
+-def read_metadata_service(base_url, version=None, ssl_details=None):
+-    reader = openstack.MetadataReader(base_url, ssl_details=ssl_details)
++def read_metadata_service(base_url, version=None, ssl_details=None,
++                          timeout=5, retries=5):
++    reader = openstack.MetadataReader(base_url, ssl_details=ssl_details,
++                                      timeout=timeout, retries=retries)
+     return reader.read_v2(version=version)
+ 
+ 

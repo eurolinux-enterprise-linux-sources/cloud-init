@@ -1,8 +1,8 @@
-From 915c7b6a8a5ef2234541a0815d86880641fa23ef Mon Sep 17 00:00:00 2001
+From 422f66427ad1338cf24a5ef52f877f01629fa7ff Mon Sep 17 00:00:00 2001
 From: Lars Kellogg-Stedman <lars@redhat.com>
 Date: Mon, 23 Jun 2014 13:14:35 -0400
-Subject: [PATCH 3/6] Stopped calling ``udevadm settle'' with --quiet since
- systemd 213 removed it
+Subject: [PATCH] Stopped calling ``udevadm settle'' with --quiet since systemd
+ 213 removed it
 
 ---
  cloudinit/sources/DataSourceAltCloud.py | 2 +-
@@ -21,6 +21,3 @@ index 1e913a6..1f3c895 100644
  
  META_DATA_NOT_SUPPORTED = {
      'block-device-mapping': {},
--- 
-2.5.0
-

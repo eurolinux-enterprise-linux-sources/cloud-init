@@ -1,7 +1,7 @@
-From 6ac3671698a058be19dc8c302e45724afa6e495c Mon Sep 17 00:00:00 2001
+From 0cf13c3c3b8e2998fe49af11ef9786e015b41109 Mon Sep 17 00:00:00 2001
 From: Lars Kellogg-Stedman <lars@redhat.com>
 Date: Wed, 6 Jan 2016 09:32:33 -0500
-Subject: [PATCH 6/6] set correct permissions on sshd_config
+Subject: [PATCH] set correct permissions on sshd_config
 
 cc_set_passwords was using the default mode in a call to
 util.write_file, which was making /etc/ssh/sshd_config mode 0644 instead
@@ -29,6 +29,3 @@ index 4a3b21a..9085f65 100644
  
          try:
              cmd = cloud.distro.init_cmd  # Default service
--- 
-2.5.0
-

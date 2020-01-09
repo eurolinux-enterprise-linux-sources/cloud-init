@@ -1,7 +1,7 @@
-From 3872d21067458483d5f782f48c7e17cbfb0ab090 Mon Sep 17 00:00:00 2001
+From b0f64aae20c58c733e90c8b82228ecfcbc1f2f17 Mon Sep 17 00:00:00 2001
 From: Scott Moser <smoser@ubuntu.com>
 Date: Fri, 16 Jan 2015 14:29:48 -0500
-Subject: [PATCH 5/6] hostname: apply hostname same as is written
+Subject: [PATCH] hostname: apply hostname same as is written
 
 on RHEL, we were writing to persistent configuration the fqdn, but
 invoking 'hostname' on the first boot with just the shortname.  On 'reboot',
@@ -135,6 +135,3 @@ index 9788a1b..43682a1 100644
      def _read_system_hostname(self):
          host_fn = self.hostname_conf_fn
          return (host_fn, self._read_hostname(host_fn))
--- 
-2.5.0
-

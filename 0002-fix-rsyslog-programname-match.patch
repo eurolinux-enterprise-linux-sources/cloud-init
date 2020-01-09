@@ -1,7 +1,7 @@
-From 55cbd66a890a09f20f557ad3803a1a4d5093bd3f Mon Sep 17 00:00:00 2001
+From 1bec08472408298ff331571a03e9691cd5bd0e61 Mon Sep 17 00:00:00 2001
 From: Lars Kellogg-Stedman <lars@redhat.com>
 Date: Mon, 23 Jun 2014 13:13:57 -0400
-Subject: [PATCH 2/6] fix rsyslog programname match
+Subject: [PATCH] fix rsyslog programname match
 
 ---
  tools/21-cloudinit.conf | 2 +-
@@ -18,6 +18,3 @@ index c65325c..248e3b1 100644
  
  # comment out the following line to allow CLOUDINIT messages through.
  # Doing so means you'll also get CLOUDINIT messages in /var/log/syslog
--- 
-2.5.0
-

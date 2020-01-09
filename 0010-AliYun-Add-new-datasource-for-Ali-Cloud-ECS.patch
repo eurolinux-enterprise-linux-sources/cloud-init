@@ -1,0 +1,287 @@
+From 99585bebc82b4b0b11f3eca6fea921eee044ba76 Mon Sep 17 00:00:00 2001
+From: "kaihuan.pkh" <kaihuan.pkh@alibaba-inc.com>
+Date: Thu, 13 Oct 2016 20:31:49 +0800
+Subject: [PATCH 1/5] AliYun: Add new datasource for Ali-Cloud ECS
+
+Support AliYun(Ali-Cloud ECS). This datasource inherits from EC2,
+the main difference is the meta-server address is changed to
+100.100.100.200.
+
+The datasource behaves similarly to EC2 and relies on network polling.
+As such, it is not enabled by default.
+
+(cherry picked from commit 4f8ceffb2e3a9feefcb718bda7a7f0f21ef7ab7c)
+
+Resolves: rhbz#1495471
+
+Signed-off-by: Ryan McCabe <rmccabe@redhat.com>
+---
+ cloudinit/sources/DataSourceAliYun.py          |  49 ++++++++
+ cloudinit/sources/DataSourceEc2.py             |  18 ++-
+ tests/unittests/test_datasource/test_aliyun.py | 148 +++++++++++++++++++++++++
+ 3 files changed, 205 insertions(+), 10 deletions(-)
+ create mode 100644 cloudinit/sources/DataSourceAliYun.py
+ create mode 100644 tests/unittests/test_datasource/test_aliyun.py
+
+diff --git a/cloudinit/sources/DataSourceAliYun.py b/cloudinit/sources/DataSourceAliYun.py
+new file mode 100644
+index 00000000..19957212
+--- /dev/null
++++ b/cloudinit/sources/DataSourceAliYun.py
+@@ -0,0 +1,49 @@
++# vi: ts=4 expandtab
++
++import os
++
++from cloudinit import sources
++from cloudinit.sources import DataSourceEc2 as EC2
++
++DEF_MD_VERSION = "2016-01-01"
++
++
++class DataSourceAliYun(EC2.DataSourceEc2):
++    metadata_urls = ["http://100.100.100.200"]
++
++    def __init__(self, sys_cfg, distro, paths):
++        super(DataSourceAliYun, self).__init__(sys_cfg, distro, paths)
++        self.seed_dir = os.path.join(paths.seed_dir, "AliYun")
++        self.api_ver = DEF_MD_VERSION
++
++    def get_hostname(self, fqdn=False, _resolve_ip=False):
++        return self.metadata.get('hostname', 'localhost.localdomain')
++
++    def get_public_ssh_keys(self):
++        return parse_public_keys(self.metadata.get('public-keys', {}))
++
++
++def parse_public_keys(public_keys):
++    keys = []
++    for key_id, key_body in public_keys.items():
++        if isinstance(key_body, str):
++            keys.append(key_body.strip())
++        elif isinstance(key_body, list):
++            keys.extend(key_body)
++        elif isinstance(key_body, dict):
++            key = key_body.get('openssh-key', [])
++            if isinstance(key, str):
++                keys.append(key.strip())
++            elif isinstance(key, list):
++                keys.extend(key)
++    return keys
++
++# Used to match classes to dependencies
++datasources = [
++    (DataSourceAliYun, (sources.DEP_FILESYSTEM, sources.DEP_NETWORK)),
++]
++
++
++# Return a list of data sources that match this set of dependencies
++def get_datasource_list(depends):
++    return sources.list_from_depends(depends, datasources)
+diff --git a/cloudinit/sources/DataSourceEc2.py b/cloudinit/sources/DataSourceEc2.py
+index 1b20ecf3..1c7c017f 100644
+--- a/cloudinit/sources/DataSourceEc2.py
++++ b/cloudinit/sources/DataSourceEc2.py
+@@ -31,21 +31,19 @@ from cloudinit import util
+ 
+ LOG = logging.getLogger(__name__)
+ 
+-DEF_MD_URL = "http://169.254.169.254"
+-
+ # Which version we are requesting of the ec2 metadata apis
+ DEF_MD_VERSION = '2009-04-04'
+ 
+-# Default metadata urls that will be used if none are provided
+-# They will be checked for 'resolveability' and some of the
+-# following may be discarded if they do not resolve
+-DEF_MD_URLS = [DEF_MD_URL, "http://instance-data.:8773"]
+-
+ 
+ class DataSourceEc2(sources.DataSource):
++    # Default metadata urls that will be used if none are provided
++    # They will be checked for 'resolveability' and some of the
++    # following may be discarded if they do not resolve
++    metadata_urls = ["http://169.254.169.254", "http://instance-data.:8773"]
++
+     def __init__(self, sys_cfg, distro, paths):
+         sources.DataSource.__init__(self, sys_cfg, distro, paths)
+-        self.metadata_address = DEF_MD_URL
++        self.metadata_address = None
+         self.seed_dir = os.path.join(paths.seed_dir, "ec2")
+         self.api_ver = DEF_MD_VERSION
+ 
+@@ -110,7 +108,7 @@ class DataSourceEc2(sources.DataSource):
+             return False
+ 
+         # Remove addresses from the list that wont resolve.
+-        mdurls = mcfg.get("metadata_urls", DEF_MD_URLS)
++        mdurls = mcfg.get("metadata_urls", self.metadata_urls)
+         filtered = [x for x in mdurls if util.is_resolvable_url(x)]
+ 
+         if set(filtered) != set(mdurls):
+@@ -121,7 +119,7 @@ class DataSourceEc2(sources.DataSource):
+             mdurls = filtered
+         else:
+             LOG.warn("Empty metadata url list! using default list")
+-            mdurls = DEF_MD_URLS
++            mdurls = self.metadata_urls
+ 
+         urls = []
+         url2base = {}
+diff --git a/tests/unittests/test_datasource/test_aliyun.py b/tests/unittests/test_datasource/test_aliyun.py
+new file mode 100644
+index 00000000..6f1de072
+--- /dev/null
++++ b/tests/unittests/test_datasource/test_aliyun.py
+@@ -0,0 +1,148 @@
++import functools
++import httpretty
++import os
++
++from .. import helpers as test_helpers
++from cloudinit import helpers
++from cloudinit.sources import DataSourceAliYun as ay
++
++DEFAULT_METADATA = {
++    'instance-id': 'aliyun-test-vm-00',
++    'eipv4': '10.0.0.1',
++    'hostname': 'test-hostname',
++    'image-id': 'm-test',
++    'launch-index': '0',
++    'mac': '00:16:3e:00:00:00',
++    'network-type': 'vpc',
++    'private-ipv4': '192.168.0.1',
++    'serial-number': 'test-string',
++    'vpc-cidr-block': '192.168.0.0/16',
++    'vpc-id': 'test-vpc',
++    'vswitch-id': 'test-vpc',
++    'vswitch-cidr-block': '192.168.0.0/16',
++    'zone-id': 'test-zone-1',
++    'ntp-conf': {'ntp_servers': [
++                 'ntp1.aliyun.com',
++                 'ntp2.aliyun.com',
++                 'ntp3.aliyun.com']},
++    'source-address': ['http://mirrors.aliyun.com',
++                       'http://mirrors.aliyuncs.com'],
++    'public-keys': {'key-pair-1': {'openssh-key': 'ssh-rsa AAAAB3...'},
++                    'key-pair-2': {'openssh-key': 'ssh-rsa AAAAB3...'}}
++}
++
++DEFAULT_USERDATA = """\
++#cloud-config
++
++hostname: localhost"""
++
++
++def register_mock_metaserver(base_url, data):
++    def register_helper(register, base_url, body):
++        if isinstance(body, str):
++            register(base_url, body)
++        elif isinstance(body, list):
++            register(base_url.rstrip('/'), '\n'.join(body) + '\n')
++        elif isinstance(body, dict):
++            vals = []
++            for k, v in body.items():
++                if isinstance(v, (str, list)):
++                    suffix = k.rstrip('/')
++                else:
++                    suffix = k.rstrip('/') + '/'
++                vals.append(suffix)
++                url = base_url.rstrip('/') + '/' + suffix
++                register_helper(register, url, v)
++            register(base_url, '\n'.join(vals) + '\n')
++
++    register = functools.partial(httpretty.register_uri, httpretty.GET)
++    register_helper(register, base_url, data)
++
++
++class TestAliYunDatasource(test_helpers.HttprettyTestCase):
++    def setUp(self):
++        super(TestAliYunDatasource, self).setUp()
++        cfg = {'datasource': {'AliYun': {'timeout': '1', 'max_wait': '1'}}}
++        distro = {}
++        paths = helpers.Paths({})
++        self.ds = ay.DataSourceAliYun(cfg, distro, paths)
++        self.metadata_address = self.ds.metadata_urls[0]
++        self.api_ver = self.ds.api_ver
++
++    @property
++    def default_metadata(self):
++        return DEFAULT_METADATA
++
++    @property
++    def default_userdata(self):
++        return DEFAULT_USERDATA
++
++    @property
++    def metadata_url(self):
++        return os.path.join(self.metadata_address,
++                            self.api_ver, 'meta-data') + '/'
++
++    @property
++    def userdata_url(self):
++        return os.path.join(self.metadata_address,
++                            self.api_ver, 'user-data')
++
++    def regist_default_server(self):
++        register_mock_metaserver(self.metadata_url, self.default_metadata)
++        register_mock_metaserver(self.userdata_url, self.default_userdata)
++
++    def _test_get_data(self):
++        self.assertEqual(self.ds.metadata, self.default_metadata)
++        self.assertEqual(self.ds.userdata_raw,
++                         self.default_userdata.encode('utf8'))
++
++    def _test_get_sshkey(self):
++        pub_keys = [v['openssh-key'] for (_, v) in
++                    self.default_metadata['public-keys'].items()]
++        self.assertEqual(self.ds.get_public_ssh_keys(), pub_keys)
++
++    def _test_get_iid(self):
++        self.assertEqual(self.default_metadata['instance-id'],
++                         self.ds.get_instance_id())
++
++    def _test_host_name(self):
++        self.assertEqual(self.default_metadata['hostname'],
++                         self.ds.get_hostname())
++
++    @httpretty.activate
++    def test_with_mock_server(self):
++        self.regist_default_server()
++        self.ds.get_data()
++        self._test_get_data()
++        self._test_get_sshkey()
++        self._test_get_iid()
++        self._test_host_name()
++
++    def test_parse_public_keys(self):
++        public_keys = {}
++        self.assertEqual(ay.parse_public_keys(public_keys), [])
++
++        public_keys = {'key-pair-0': 'ssh-key-0'}
++        self.assertEqual(ay.parse_public_keys(public_keys),
++                         [public_keys['key-pair-0']])
++
++        public_keys = {'key-pair-0': 'ssh-key-0', 'key-pair-1': 'ssh-key-1'}
++        self.assertEqual(set(ay.parse_public_keys(public_keys)),
++                         set([public_keys['key-pair-0'],
++                             public_keys['key-pair-1']]))
++
++        public_keys = {'key-pair-0': ['ssh-key-0', 'ssh-key-1']}
++        self.assertEqual(ay.parse_public_keys(public_keys),
++                         public_keys['key-pair-0'])
++
++        public_keys = {'key-pair-0': {'openssh-key': []}}
++        self.assertEqual(ay.parse_public_keys(public_keys), [])
++
++        public_keys = {'key-pair-0': {'openssh-key': 'ssh-key-0'}}
++        self.assertEqual(ay.parse_public_keys(public_keys),
++                         [public_keys['key-pair-0']['openssh-key']])
++
++        public_keys = {'key-pair-0': {'openssh-key': ['ssh-key-0',
++                                                      'ssh-key-1']}}
++        self.assertEqual(ay.parse_public_keys(public_keys),
++                         public_keys['key-pair-0']['openssh-key'])
+-- 
+2.13.5
+
