@@ -28,8 +28,8 @@ LOG = logging.getLogger(__name__)
 CLOUD_INFO_FILE = '/etc/sysconfig/cloud-info'
 
 # Shell command lists
-CMD_PROBE_FLOPPY = ['/sbin/modprobe', 'floppy']
-CMD_UDEVADM_SETTLE = ['/sbin/udevadm', 'settle', '--timeout=5']
+CMD_PROBE_FLOPPY = ['modprobe', 'floppy']
+CMD_UDEVADM_SETTLE = ['udevadm', 'settle', '--timeout=5']
 
 META_DATA_NOT_SUPPORTED = {
     'block-device-mapping': {},
@@ -74,6 +74,9 @@ def read_user_data_callback(mount_dir):
 
 
 class DataSourceAltCloud(sources.DataSource):
+
+    dsname = 'AltCloud'
+
     def __init__(self, sys_cfg, distro, paths):
         sources.DataSource.__init__(self, sys_cfg, distro, paths)
         self.seed = None
@@ -112,7 +115,7 @@ class DataSourceAltCloud(sources.DataSource):
 
         return 'UNKNOWN'
 
-    def get_data(self):
+    def _get_data(self):
         '''
         Description:
             User Data is passed to the launching instance which
@@ -142,7 +145,7 @@ class DataSourceAltCloud(sources.DataSource):
         else:
             cloud_type = self.get_cloud_type()
 
-        LOG.debug('cloud_type: ' + str(cloud_type))
+        LOG.debug('cloud_type: %s', str(cloud_type))
 
         if 'RHEV' in cloud_type:
             if self.user_data_rhevm():
@@ -181,7 +184,7 @@ class DataSourceAltCloud(sources.DataSource):
         try:
             cmd = CMD_PROBE_FLOPPY
             (cmd_out, _err) = util.subp(cmd)
-            LOG.debug(('Command: %s\nOutput%s') % (' '.join(cmd), cmd_out))
+            LOG.debug('Command: %s\nOutput%s', ' '.join(cmd), cmd_out)
         except ProcessExecutionError as _err:
             util.logexc(LOG, 'Failed command: %s\n%s', ' '.join(cmd), _err)
             return False
@@ -196,13 +199,12 @@ class DataSourceAltCloud(sources.DataSource):
             cmd = CMD_UDEVADM_SETTLE
             cmd.append('--exit-if-exists=' + floppy_dev)
             (cmd_out, _err) = util.subp(cmd)
-            LOG.debug(('Command: %s\nOutput%s') % (' '.join(cmd), cmd_out))
+            LOG.debug('Command: %s\nOutput%s', ' '.join(cmd), cmd_out)
         except ProcessExecutionError as _err:
             util.logexc(LOG, 'Failed command: %s\n%s', ' '.join(cmd), _err)
             return False
         except OSError as _err:
-            util.logexc(LOG, 'Failed command: %s\n%s', ' '.join(cmd),
-                        _err.message)
+            util.logexc(LOG, 'Failed command: %s\n%s', ' '.join(cmd), _err)
             return False
 
         try:

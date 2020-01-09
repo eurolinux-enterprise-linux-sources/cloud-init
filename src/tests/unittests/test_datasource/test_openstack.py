@@ -5,10 +5,11 @@
 # This file is part of cloud-init. See LICENSE file for license information.
 
 import copy
+import httpretty as hp
 import json
 import re
 
-from .. import helpers as test_helpers
+from cloudinit.tests import helpers as test_helpers
 
 from six.moves.urllib.parse import urlparse
 from six import StringIO
@@ -19,8 +20,6 @@ from cloudinit.sources import convert_vendordata
 from cloudinit.sources import DataSourceOpenStack as ds
 from cloudinit.sources.helpers import openstack
 from cloudinit import util
-
-hp = test_helpers.import_httpretty()
 
 BASE_URL = "http://169.254.169.254"
 PUBKEY = u'ssh-rsa AAAAB3NzaC1....sIkJhq8wdX+4I3A4cYbYP ubuntu@server-460\n'
@@ -58,6 +57,8 @@ OS_FILES = {
     'openstack/content/0000': CONTENT_0,
     'openstack/content/0001': CONTENT_1,
     'openstack/latest/meta_data.json': json.dumps(OSTACK_META),
+    'openstack/latest/network_data.json': json.dumps(
+        {'links': [], 'networks': [], 'services': []}),
     'openstack/latest/user_data': USER_DATA,
     'openstack/latest/vendor_data.json': json.dumps(VENDOR_DATA),
 }
@@ -69,6 +70,7 @@ EC2_VERSIONS = [
 ]
 
 
+# TODO _register_uris should leverage test_ec2.register_mock_metaserver.
 def _register_uris(version, ec2_files, ec2_meta, os_files):
     """Registers a set of url patterns into httpretty that will mimic the
     same data returned by the openstack metadata service (and ec2 service)."""
@@ -128,6 +130,10 @@ def _read_metadata_service():
 
 class TestOpenStackDataSource(test_helpers.HttprettyTestCase):
     VERSION = 'latest'
+
+    def setUp(self):
+        super(TestOpenStackDataSource, self).setUp()
+        self.tmp = self.tmp_dir()
 
     @hp.activate
     def test_successful(self):
@@ -230,9 +236,9 @@ class TestOpenStackDataSource(test_helpers.HttprettyTestCase):
         _register_uris(self.VERSION, EC2_FILES, EC2_META, OS_FILES)
         ds_os = ds.DataSourceOpenStack(settings.CFG_BUILTIN,
                                        None,
-                                       helpers.Paths({}))
+                                       helpers.Paths({'run_dir': self.tmp}))
         self.assertIsNone(ds_os.version)
-        found = ds_os.get_data(timeout=0.1, retries=0)
+        found = ds_os.get_data()
         self.assertTrue(found)
         self.assertEqual(2, ds_os.version)
         md = dict(ds_os.metadata)
@@ -243,7 +249,7 @@ class TestOpenStackDataSource(test_helpers.HttprettyTestCase):
         self.assertEqual(USER_DATA, ds_os.userdata_raw)
         self.assertEqual(2, len(ds_os.files))
         self.assertEqual(VENDOR_DATA, ds_os.vendordata_pure)
-        self.assertEqual(ds_os.vendordata_raw, None)
+        self.assertIsNone(ds_os.vendordata_raw)
 
     @hp.activate
     def test_bad_datasource_meta(self):
@@ -254,9 +260,9 @@ class TestOpenStackDataSource(test_helpers.HttprettyTestCase):
         _register_uris(self.VERSION, {}, {}, os_files)
         ds_os = ds.DataSourceOpenStack(settings.CFG_BUILTIN,
                                        None,
-                                       helpers.Paths({}))
+                                       helpers.Paths({'run_dir': self.tmp}))
         self.assertIsNone(ds_os.version)
-        found = ds_os.get_data(timeout=0.1, retries=0)
+        found = ds_os.get_data()
         self.assertFalse(found)
         self.assertIsNone(ds_os.version)
 
@@ -269,13 +275,13 @@ class TestOpenStackDataSource(test_helpers.HttprettyTestCase):
         _register_uris(self.VERSION, {}, {}, os_files)
         ds_os = ds.DataSourceOpenStack(settings.CFG_BUILTIN,
                                        None,
-                                       helpers.Paths({}))
+                                       helpers.Paths({'run_dir': self.tmp}))
         ds_os.ds_cfg = {
             'max_wait': 0,
             'timeout': 0,
         }
         self.assertIsNone(ds_os.version)
-        found = ds_os.get_data(timeout=0.1, retries=0)
+        found = ds_os.get_data()
         self.assertFalse(found)
         self.assertIsNone(ds_os.version)
 
@@ -292,13 +298,13 @@ class TestOpenStackDataSource(test_helpers.HttprettyTestCase):
         _register_uris(self.VERSION, {}, {}, os_files)
         ds_os = ds.DataSourceOpenStack(settings.CFG_BUILTIN,
                                        None,
-                                       helpers.Paths({}))
+                                       helpers.Paths({'run_dir': self.tmp}))
         ds_os.ds_cfg = {
             'max_wait': 0,
             'timeout': 0,
         }
         self.assertIsNone(ds_os.version)
-        found = ds_os.get_data(timeout=0.1, retries=0)
+        found = ds_os.get_data()
         self.assertFalse(found)
         self.assertIsNone(ds_os.version)
 
@@ -319,7 +325,7 @@ class TestVendorDataLoading(test_helpers.TestCase):
         self.assertEqual(self.cvj(data), data)
 
     def test_vd_load_dict_no_ci(self):
-        self.assertEqual(self.cvj({'foo': 'bar'}), None)
+        self.assertIsNone(self.cvj({'foo': 'bar'}))
 
     def test_vd_load_dict_ci_dict(self):
         self.assertRaises(ValueError, self.cvj,

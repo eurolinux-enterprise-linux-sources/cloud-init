@@ -6,75 +6,35 @@
 %global debug_package %{nil}
 
 Name:           cloud-init
-Version:        0.7.9
-Release:        24%{?dist}.1
+Version:        18.2
+Release:        1%{?dist}
 Summary:        Cloud instance init scripts
 
 Group:          System Environment/Base
 License:        GPLv3
 URL:            http://launchpad.net/cloud-init
 Source0:        https://launchpad.net/cloud-init/trunk/%{version}/+download/%{name}-%{version}.tar.gz
-Source1:        cloud-init-rhel.cfg
-Source2:        cloud-init-README.rhel
-Source3:        cloud-init-tmpfiles.conf
+Source1:        cloud-init-tmpfiles.conf
 
-# The following line stops 'rdopkg update-patches' from inserting Patch
-# directives in the middle of our Source directives.
-#
-# patches_base=0.7.9
-Patch0001: 0001-configuration-changes-for-RHEL-package.patch
-Patch0002: 0002-do-not-use-git-to-determine-version.patch
-Patch0003: 0003-util-teach-write_file-about-copy_mode-option.patch
-Patch0004: 0004-Do-not-write-NM_CONTROLLED-no-in-generated-interface.patch
-Patch0005: 0005-url_helper-fail-gracefully-if-oauthlib-is-not-availa.patch
-Patch0006: 0006-rsyslog-replace-with-stop.patch
-Patch0007: 0007-OpenStack-Use-timeout-and-retries-from-config-in-get.patch
-Patch0008: 0008-correct-errors-in-cloudinit-net-sysconfig.py.patch
-Patch0009: 0009-net-do-not-raise-exception-for-3-nameservers.patch
-Patch0010: 0010-net-support-both-ipv4-and-ipv6-gateways-in-sysconfig.patch
-Patch0011: 0011-systemd-replace-generator-with-unit-conditionals.patch
-Patch0012: 0012-OpenStack-add-dvs-to-the-list-of-physical-link-types.patch
-Patch0013: 0013-Bounce-network-interface-for-Azure-when-using-the-bu.patch
-Patch0014: 0014-limit-permissions-on-def_log_file.patch
-Patch0015: 0015-remove-tee-command-from-logging-configuration.patch
-Patch0016: 0016-add-power-state-change-module-to-cloud_final_modules.patch
-Patch0017: 0017-sysconfig-Raise-ValueError-when-multiple-default-gat.patch
-Patch0018: 0018-Fix-dual-stack-IPv4-IPv6-configuration-for-RHEL.patch
-Patch0019: 0019-Add-missing-sysconfig-unit-test-data.patch
-Patch0020: 0020-Fix-ipv6-subnet-detection.patch
-# Not applied to work around additional issues related to rhbz#1474226
-#Patch0021: 0021-azure-ensure-that-networkmanager-hook-script-runs.patch
-Patch0022: 0022-RHEL-CentOS-Fix-default-routes-for-IPv4-IPv6-configu.patch
-Patch0023: 0023-DatasourceEc2-add-warning-message-when-not-on-AWS.patch
-Patch0024: 0024-Identify-Brightbox-as-an-Ec2-datasource-user.patch
-Patch0025: 0025-AliYun-Enable-platform-identification-and-enable-by-.patch
-Patch0026: 0026-Fix-alibaba-cloud-unit-tests-to-work-with-0.7.9.patch
-Patch0027: 0027-Fix-eni-rendering-of-multiple-IPs-per-interface.patch
-Patch0028: 0028-systemd-create-run-cloud-init-enabled.patch
-Patch0029: 0029-support-loopback-as-a-device-type.patch
-Patch0030: 0030-sysconfig-include-GATEWAY-value-if-set-in-subnet.patch
-Patch0031: 0031-rh_subscription-Perform-null-checks-for-enabled-and-.patch
-Patch0032: 0032-net-Allow-for-NetworkManager-configuration.patch
-Patch0033: 0033-Render-DNS-and-DOMAIN-lines-for-sysconfig.patch
-Patch0034: 0034-Start_cloud_init_after_dbus.patch
-Patch0035: 0035-sysconfig-Render-IPV6_DEFAULTGW-correctly.patch
-Patch0036: 0036-sysconfig-Don-t-write-BOOTPROTO-dhcp-for-ipv6-dhcp.patch
-Patch0037: 0037-sysconfig-Fix-traceback.patch
-Patch0038: 0038-Fix-bug-that-resulted-in-an-attempt-to-rename-bonds.patch
-Patch0039: 0039-azure-Fix-publishing-of-hostname.patch
-# For bz#1568717 - Add patch to bounce NICs in Azure/update DNS [rhel-7.5.z]
-Patch40: ci-Revert-azure-Fix-publishing-of-hostname.patch
-# For bz#1568717 - Add patch to bounce NICs in Azure/update DNS [rhel-7.5.z]
-Patch41: ci-DataSourceAzure.py-use-hostnamectl-to-set-hostname.patch
-# For bz#1578702 - cloud-init-0.7.9-9.el7_4.6 breaks IPv4/IPv6 dual-stack EC2 instances in AWS [rhel-7.5.z]
-Patch42: ci-sysconfig-Don-t-disable-IPV6_AUTOCONF.patch
+Patch0001: 0001-Add-initial-redhat-setup.patch
+Patch0002: 0002-Do-not-write-NM_CONTROLLED-no-in-generated-interface.patch
+Patch0003: 0003-limit-permissions-on-def_log_file.patch
+Patch0004: 0004-remove-tee-command-from-logging-configuration.patch
+Patch0005: 0005-add-power-state-change-module-to-cloud_final_modules.patch
+Patch0006: 0006-azure-ensure-that-networkmanager-hook-script-runs.patch
+Patch0007: 0007-sysconfig-Don-t-write-BOOTPROTO-dhcp-for-ipv6-dhcp.patch
+Patch0008: 0008-DataSourceAzure.py-use-hostnamectl-to-set-hostname.patch
+Patch0009: 0009-sysconfig-Don-t-disable-IPV6_AUTOCONF.patch
 
 # Deal with noarch -> arch
 # https://bugzilla.redhat.com/show_bug.cgi?id=1067089
 Obsoletes:      cloud-init < 0.7.5-3
 
 BuildRequires:  python-devel
+BuildRequires:  python-requests
 BuildRequires:  python-setuptools
+BuildRequires:  python-six
+BuildRequires:  python-yaml
 BuildRequires:  systemd-units
 BuildRequires:  git
 
@@ -93,6 +53,7 @@ Requires:       python-jsonpatch
 Requires:       python-prettytable
 Requires:       python-requests
 Requires:       python-setuptools
+Requires:       python-six
 Requires:       PyYAML
 Requires:       pyserial
 Requires:       shadow-utils
@@ -108,10 +69,9 @@ ssh keys and to let the user run various scripts.
 
 %prep
 # on el7, autosetup -S git was failing with patches that
-# create new files.  rpm 4.11.3 and later has -S git_am, but
-# el7 only has 4.11.1.
+# # create new files.  rpm 4.11.3 and later has -S git_am, but
+# # el7 only has 4.11.1.
 %autosetup -p1 -n %{name}-%{version} -S git
-
 
 %build
 %{__python} setup.py build
@@ -122,7 +82,7 @@ rm -rf $RPM_BUILD_ROOT
 %{__python} setup.py install -O1 --skip-build --root $RPM_BUILD_ROOT
 
 # Don't ship the tests
-rm -r $RPM_BUILD_ROOT%{python_sitelib}/tests
+#rm -r $RPM_BUILD_ROOT%{python_sitelib}/tests
 
 mkdir -p $RPM_BUILD_ROOT/var/lib/cloud
 
@@ -217,14 +177,9 @@ fi
 %config(noreplace) %{_sysconfdir}/rsyslog.d/21-cloudinit.conf
 
 %changelog
-* Thu May 17 2018 Miroslav Rezanina <mrezanin@redhat.com> - 0.7.9-24.el7_5.1
-- ci-Revert-azure-Fix-publishing-of-hostname.patch [bz#1568717]
-- ci-DataSourceAzure.py-use-hostnamectl-to-set-hostname.patch [bz#1568717]
-- ci-sysconfig-Don-t-disable-IPV6_AUTOCONF.patch [bz#1578702]
-- Resolves: bz#1568717
-  (Add patch to bounce NICs in Azure/update DNS [rhel-7.5.z])
-- Resolves: bz#1578702
-  (cloud-init-0.7.9-9.el7_4.6 breaks IPv4/IPv6 dual-stack EC2 instances in AWS [rhel-7.5.z])
+* Thu Jun 21 2018 Miroslav Rezanina <mrezanin@redhat.com>
+- Rebase to 18.2
+  Resolves: rhbz#1525267
 
 * Tue Feb 13 2018 Ryan McCabe <rmccabe@redhat.com> 0.7.9-24
 - Set DHCP_HOSTNAME on Azure to allow for the hostname to be

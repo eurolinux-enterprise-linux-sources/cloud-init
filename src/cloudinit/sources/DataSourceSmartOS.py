@@ -159,6 +159,9 @@ LEGACY_USER_D = "/var/db"
 
 
 class DataSourceSmartOS(sources.DataSource):
+
+    dsname = "Joyent"
+
     _unset = "_unset"
     smartos_type = _unset
     md_client = _unset
@@ -211,7 +214,7 @@ class DataSourceSmartOS(sources.DataSource):
             os.rename('/'.join([svc_path, 'provisioning']),
                       '/'.join([svc_path, 'provision_success']))
 
-    def get_data(self):
+    def _get_data(self):
         self._init()
 
         md = {}
@@ -555,7 +558,7 @@ class JoyentMetadataLegacySerialClient(JoyentMetadataSerialClient):
                 val = base64.b64decode(val.encode()).decode()
             # Bogus input produces different errors in Python 2 and 3
             except (TypeError, binascii.Error):
-                LOG.warn("Failed base64 decoding key '%s': %s", key, val)
+                LOG.warning("Failed base64 decoding key '%s': %s", key, val)
 
         if strip:
             val = val.strip()

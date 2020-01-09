@@ -22,8 +22,11 @@ DEF_SSHD_CFG = "/etc/ssh/sshd_config"
 VALID_KEY_TYPES = (
     "dsa",
     "ecdsa",
+    "ecdsa-sha2-nistp256",
     "ecdsa-sha2-nistp256-cert-v01@openssh.com",
+    "ecdsa-sha2-nistp384",
     "ecdsa-sha2-nistp384-cert-v01@openssh.com",
+    "ecdsa-sha2-nistp521",
     "ecdsa-sha2-nistp521-cert-v01@openssh.com",
     "ed25519",
     "rsa",
@@ -168,16 +171,13 @@ def parse_authorized_keys(fname):
 
 
 def update_authorized_keys(old_entries, keys):
-    to_add = list(keys)
-
+    to_add = list([k for k in keys if k.valid()])
     for i in range(0, len(old_entries)):
         ent = old_entries[i]
         if not ent.valid():
             continue
         # Replace those with the same base64
         for k in keys:
-            if not ent.valid():
-                continue
             if k.base64 == ent.base64:
                 # Replace it with our better one
                 ent = k

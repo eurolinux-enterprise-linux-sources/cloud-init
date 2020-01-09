@@ -33,7 +33,7 @@ import six
 from cloudinit import helpers as c_helpers
 from cloudinit.util import b64e
 
-from ..helpers import mock, FilesystemMockingTestCase, TestCase
+from cloudinit.tests.helpers import mock, FilesystemMockingTestCase, TestCase
 
 SDC_NICS = json.loads("""
 [
@@ -359,7 +359,8 @@ class TestSmartOSDataSource(FilesystemMockingTestCase):
 
         self.tmp = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.tmp)
-        self.paths = c_helpers.Paths({'cloud_dir': self.tmp})
+        self.paths = c_helpers.Paths(
+            {'cloud_dir': self.tmp, 'run_dir': self.tmp})
 
         self.legacy_user_d = os.path.join(self.tmp, 'legacy_user_tmp')
         os.mkdir(self.legacy_user_d)

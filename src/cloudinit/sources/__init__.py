@@ -10,9 +10,11 @@
 
 import abc
 import copy
+import json
 import os
 import six
 
+from cloudinit.atomic_helper import write_json
 from cloudinit import importer
 from cloudinit import log as logging
 from cloudinit import type_utils
@@ -33,6 +35,12 @@ DEP_FILESYSTEM = "FILESYSTEM"
 DEP_NETWORK = "NETWORK"
 DS_PREFIX = 'DataSource'
 
+# File in which instance meta-data, user-data and vendor-data is written
+INSTANCE_JSON_FILE = 'instance-data.json'
+
+# Key which can be provide a cloud's official product name to cloud-init
+METADATA_CLOUD_NAME_KEY = 'cloud-name'
+
 LOG = logging.getLogger(__name__)
 
 
@@ -40,32 +48,51 @@ class DataSourceNotFoundException(Exception):
     pass
 
 
+def process_base64_metadata(metadata, key_path=''):
+    """Strip ci-b64 prefix and return metadata with base64-encoded-keys set."""
+    md_copy = copy.deepcopy(metadata)
+    md_copy['base64-encoded-keys'] = []
+    for key, val in metadata.items():
+        if key_path:
+            sub_key_path = key_path + '/' + key
+        else:
+            sub_key_path = key
+        if isinstance(val, str) and val.startswith('ci-b64:'):
+            md_copy['base64-encoded-keys'].append(sub_key_path)
+            md_copy[key] = val.replace('ci-b64:', '')
+        if isinstance(val, dict):
+            return_val = process_base64_metadata(val, sub_key_path)
+            md_copy['base64-encoded-keys'].extend(
+                return_val.pop('base64-encoded-keys'))
+            md_copy[key] = return_val
+    return md_copy
+
+
 @six.add_metaclass(abc.ABCMeta)
 class DataSource(object):
 
     dsmode = DSMODE_NETWORK
+    default_locale = 'en_US.UTF-8'
+
+    # Datasource name needs to be set by subclasses to determine which
+    # cloud-config datasource key is loaded
+    dsname = '_undef'
+
+    # Cached cloud_name as determined by _get_cloud_name
+    _cloud_name = None
 
     def __init__(self, sys_cfg, distro, paths, ud_proc=None):
         self.sys_cfg = sys_cfg
         self.distro = distro
         self.paths = paths
         self.userdata = None
-        self.metadata = None
+        self.metadata = {}
         self.userdata_raw = None
         self.vendordata = None
         self.vendordata_raw = None
 
-        # find the datasource config name.
-        # remove 'DataSource' from classname on front, and remove 'Net' on end.
-        # Both Foo and FooNet sources expect config in cfg['sources']['Foo']
-        name = type_utils.obj_name(self)
-        if name.startswith(DS_PREFIX):
-            name = name[len(DS_PREFIX):]
-        if name.endswith('Net'):
-            name = name[0:-3]
-
-        self.ds_cfg = util.get_cfg_by_path(self.sys_cfg,
-                                           ("datasource", name), {})
+        self.ds_cfg = util.get_cfg_by_path(
+            self.sys_cfg, ("datasource", self.dsname), {})
         if not self.ds_cfg:
             self.ds_cfg = {}
 
@@ -76,6 +103,51 @@ class DataSource(object):
 
     def __str__(self):
         return type_utils.obj_name(self)
+
+    def _get_standardized_metadata(self):
+        """Return a dictionary of standardized metadata keys."""
+        return {'v1': {
+            'local-hostname': self.get_hostname(),
+            'instance-id': self.get_instance_id(),
+            'cloud-name': self.cloud_name,
+            'region': self.region,
+            'availability-zone': self.availability_zone}}
+
+    def get_data(self):
+        """Datasources implement _get_data to setup metadata and userdata_raw.
+
+        Minimally, the datasource should return a boolean True on success.
+        """
+        return_value = self._get_data()
+        json_file = os.path.join(self.paths.run_dir, INSTANCE_JSON_FILE)
+        if not return_value:
+            return return_value
+
+        instance_data = {
+            'ds': {
+                'meta-data': self.metadata,
+                'user-data': self.get_userdata_raw(),
+                'vendor-data': self.get_vendordata_raw()}}
+        instance_data.update(
+            self._get_standardized_metadata())
+        try:
+            # Process content base64encoding unserializable values
+            content = util.json_dumps(instance_data)
+            # Strip base64: prefix and return base64-encoded-keys
+            processed_data = process_base64_metadata(json.loads(content))
+        except TypeError as e:
+            LOG.warning('Error persisting instance-data.json: %s', str(e))
+            return return_value
+        except UnicodeDecodeError as e:
+            LOG.warning('Error persisting instance-data.json: %s', str(e))
+            return return_value
+        write_json(json_file, processed_data, mode=0o600)
+        return return_value
+
+    def _get_data(self):
+        raise NotImplementedError(
+            'Subclasses of DataSource must implement _get_data which'
+            ' sets self.metadata, vendordata_raw and userdata_raw.')
 
     def get_userdata(self, apply_filter=False):
         if self.userdata is None:
@@ -88,6 +160,34 @@ class DataSource(object):
         if self.vendordata is None:
             self.vendordata = self.ud_proc.process(self.get_vendordata_raw())
         return self.vendordata
+
+    @property
+    def cloud_name(self):
+        """Return lowercase cloud name as determined by the datasource.
+
+        Datasource can determine or define its own cloud product name in
+        metadata.
+        """
+        if self._cloud_name:
+            return self._cloud_name
+        if self.metadata and self.metadata.get(METADATA_CLOUD_NAME_KEY):
+            cloud_name = self.metadata.get(METADATA_CLOUD_NAME_KEY)
+            if isinstance(cloud_name, six.string_types):
+                self._cloud_name = cloud_name.lower()
+            LOG.debug(
+                'Ignoring metadata provided key %s: non-string type %s',
+                METADATA_CLOUD_NAME_KEY, type(cloud_name))
+        else:
+            self._cloud_name = self._get_cloud_name().lower()
+        return self._cloud_name
+
+    def _get_cloud_name(self):
+        """Return the datasource name as it frequently matches cloud name.
+
+        Should be overridden in subclasses which can run on multiple
+        cloud names, such as DatasourceEc2.
+        """
+        return self.dsname
 
     @property
     def launch_index(self):
@@ -150,12 +250,21 @@ class DataSource(object):
         return None
 
     def get_locale(self):
-        return 'en_US.UTF-8'
+        """Default locale is en_US.UTF-8, but allow distros to override"""
+        locale = self.default_locale
+        try:
+            locale = self.distro.get_locale()
+        except NotImplementedError:
+            pass
+        return locale
 
     @property
     def availability_zone(self):
-        return self.metadata.get('availability-zone',
-                                 self.metadata.get('availability_zone'))
+        top_level_az = self.metadata.get(
+            'availability-zone', self.metadata.get('availability_zone'))
+        if top_level_az:
+            return top_level_az
+        return self.metadata.get('placement', {}).get('availability-zone')
 
     @property
     def region(self):
@@ -167,21 +276,34 @@ class DataSource(object):
             return "iid-datasource"
         return str(self.metadata['instance-id'])
 
-    def get_hostname(self, fqdn=False, resolve_ip=False):
+    def get_hostname(self, fqdn=False, resolve_ip=False, metadata_only=False):
+        """Get hostname or fqdn from the datasource. Look it up if desired.
+
+        @param fqdn: Boolean, set True to return hostname with domain.
+        @param resolve_ip: Boolean, set True to attempt to resolve an ipv4
+            address provided in local-hostname meta-data.
+        @param metadata_only: Boolean, set True to avoid looking up hostname
+            if meta-data doesn't have local-hostname present.
+
+        @return: hostname or qualified hostname. Optionally return None when
+            metadata_only is True and local-hostname data is not available.
+        """
         defdomain = "localdomain"
         defhost = "localhost"
         domain = defdomain
 
         if not self.metadata or 'local-hostname' not in self.metadata:
+            if metadata_only:
+                return None
             # this is somewhat questionable really.
             # the cloud datasource was asked for a hostname
             # and didn't have one. raising error might be more appropriate
             # but instead, basically look up the existing hostname
             toks = []
             hostname = util.get_hostname()
-            fqdn = util.get_fqdn_from_hosts(hostname)
-            if fqdn and fqdn.find(".") > 0:
-                toks = str(fqdn).split(".")
+            hosts_fqdn = util.get_fqdn_from_hosts(hostname)
+            if hosts_fqdn and hosts_fqdn.find(".") > 0:
+                toks = str(hosts_fqdn).split(".")
             elif hostname and hostname.find(".") > 0:
                 toks = str(hostname).split(".")
             elif hostname:
@@ -210,7 +332,7 @@ class DataSource(object):
         else:
             hostname = toks[0]
 
-        if fqdn:
+        if fqdn and domain != defdomain:
             return "%s.%s" % (hostname, domain)
         else:
             return hostname
@@ -237,8 +359,8 @@ class DataSource(object):
             if candidate in valid:
                 return candidate
             else:
-                LOG.warn("invalid dsmode '%s', using default=%s",
-                         candidate, default)
+                LOG.warning("invalid dsmode '%s', using default=%s",
+                            candidate, default)
                 return default
 
         return default
@@ -251,10 +373,23 @@ class DataSource(object):
     def first_instance_boot(self):
         return
 
+    def setup(self, is_new_instance):
+        """setup(is_new_instance)
+
+        This is called before user-data and vendor-data have been processed.
+
+        Unless the datasource has set mode to 'local', then networking
+        per 'fallback' or per 'network_config' will have been written and
+        brought up the OS at this point.
+        """
+        return
+
     def activate(self, cfg, is_new_instance):
         """activate(cfg, is_new_instance)
 
-        This is called before the init_modules will be called.
+        This is called before the init_modules will be called but after
+        the user-data and vendor-data have been fully processed.
+
         The cfg is fully up to date config, it contains a merged view of
            system config, datasource config, user config, vendor config.
         It should be used rather than the sys_cfg passed to __init__.
@@ -326,7 +461,7 @@ def find_source(sys_cfg, distro, paths, ds_deps, cfg_list, pkg_list, reporter):
 # Return an ordered list of classes that match (if any)
 def list_sources(cfg_list, depends, pkg_list):
     src_list = []
-    LOG.debug(("Looking for for data source in: %s,"
+    LOG.debug(("Looking for data source in: %s,"
                " via packages %s that matches dependencies %s"),
               cfg_list, pkg_list, depends)
     for ds_name in cfg_list:
@@ -396,5 +531,6 @@ def list_from_depends(depends, ds_list):
         if depset == set(deps):
             ret_list.append(cls)
     return ret_list
+
 
 # vi: ts=4 expandtab

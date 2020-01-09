@@ -4,7 +4,14 @@
 #
 # This file is part of cloud-init. See LICENSE file for license information.
 
-__VERSION__ = "0.7.9"
+__VERSION__ = "18.2"
+
+FEATURES = [
+    # supports network config version 1
+    'NETWORK_CONFIG_V1',
+    # supports network config version 2 (netplan)
+    'NETWORK_CONFIG_V2',
+]
 
 
 def version_string():

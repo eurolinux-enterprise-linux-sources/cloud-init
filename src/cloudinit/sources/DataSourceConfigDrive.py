@@ -14,6 +14,7 @@ from cloudinit import util
 
 from cloudinit.net import eni
 
+from cloudinit.sources.DataSourceIBMCloud import get_ibm_platform
 from cloudinit.sources.helpers import openstack
 
 LOG = logging.getLogger(__name__)
@@ -25,13 +26,16 @@ DEFAULT_METADATA = {
     "instance-id": DEFAULT_IID,
 }
 FS_TYPES = ('vfat', 'iso9660')
-LABEL_TYPES = ('config-2',)
+LABEL_TYPES = ('config-2', 'CONFIG-2')
 POSSIBLE_MOUNTS = ('sr', 'cd')
 OPTICAL_DEVICES = tuple(('/dev/%s%s' % (z, i) for z in POSSIBLE_MOUNTS
                         for i in range(0, 2)))
 
 
 class DataSourceConfigDrive(openstack.SourceMixin, sources.DataSource):
+
+    dsname = 'ConfigDrive'
+
     def __init__(self, sys_cfg, distro, paths):
         super(DataSourceConfigDrive, self).__init__(sys_cfg, distro, paths)
         self.source = None
@@ -50,17 +54,20 @@ class DataSourceConfigDrive(openstack.SourceMixin, sources.DataSource):
         mstr += "[source=%s]" % (self.source)
         return mstr
 
-    def get_data(self):
+    def _get_data(self):
         found = None
         md = {}
         results = {}
-        if os.path.isdir(self.seed_dir):
+        for sdir in (self.seed_dir, "/config-drive"):
+            if not os.path.isdir(sdir):
+                continue
             try:
-                results = read_config_drive(self.seed_dir)
-                found = self.seed_dir
+                results = read_config_drive(sdir)
+                found = sdir
+                break
             except openstack.NonReadable:
-                util.logexc(LOG, "Failed reading config drive from %s",
-                            self.seed_dir)
+                util.logexc(LOG, "Failed reading config drive from %s", sdir)
+
         if not found:
             for dev in find_candidate_devs():
                 try:
@@ -124,7 +131,7 @@ class DataSourceConfigDrive(openstack.SourceMixin, sources.DataSource):
         try:
             self.vendordata_raw = sources.convert_vendordata(vd)
         except ValueError as e:
-            LOG.warn("Invalid content in vendor-data: %s", e)
+            LOG.warning("Invalid content in vendor-data: %s", e)
             self.vendordata_raw = None
 
         # network_config is an /etc/network/interfaces formated file and is
@@ -187,7 +194,7 @@ def on_first_boot(data, distro=None, network=True):
     if network:
         net_conf = data.get("network_config", '')
         if net_conf and distro:
-            LOG.warn("Updating network interfaces from config drive")
+            LOG.warning("Updating network interfaces from config drive")
             distro.apply_network(net_conf)
     write_injected_files(data.get('files'))
 
@@ -218,7 +225,7 @@ def find_candidate_devs(probe_optical=True):
     config drive v2:
        Disk should be:
         * either vfat or iso9660 formated
-        * labeled with 'config-2'
+        * labeled with 'config-2' or 'CONFIG-2'
     """
     # query optical drive to get it in blkid cache for 2.6 kernels
     if probe_optical:
@@ -249,6 +256,15 @@ def find_candidate_devs(probe_optical=True):
     # an unpartitioned block device (ex sda, not sda1)
     devices = [d for d in candidates
                if d in by_label or not util.is_partition(d)]
+
+    if devices:
+        # IBMCloud uses config-2 label, but limited to a single UUID.
+        ibm_platform, ibm_path = get_ibm_platform()
+        if ibm_path in devices:
+            devices.remove(ibm_path)
+            LOG.debug("IBMCloud device '%s' (%s) removed from candidate list",
+                      ibm_path, ibm_platform)
+
     return devices
 
 

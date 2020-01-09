@@ -8,16 +8,21 @@ import shutil
 import stat
 import tempfile
 
+import json
 import six
+import sys
 import yaml
 
 from cloudinit import importer, util
-from . import helpers
+from cloudinit.tests import helpers
 
 try:
     from unittest import mock
 except ImportError:
     import mock
+
+
+BASH = util.which('bash')
 
 
 class FakeSelinux(object):
@@ -44,7 +49,7 @@ class TestGetCfgOptionListOrStr(helpers.TestCase):
         """None is returned if key is not found and no default given."""
         config = {}
         result = util.get_cfg_option_list(config, "key")
-        self.assertEqual(None, result)
+        self.assertIsNone(result)
 
     def test_not_found_with_default(self):
         """Default is returned if key is not found."""
@@ -103,12 +108,41 @@ class TestWriteFile(helpers.TestCase):
         self.assertTrue(os.path.isdir(dirname))
         self.assertTrue(os.path.isfile(path))
 
-    def test_custom_mode(self):
-        """Verify custom mode works properly."""
+    def test_explicit_mode(self):
+        """Verify explicit file mode works properly."""
         path = os.path.join(self.tmp, "NewFile.txt")
         contents = "Hey there"
 
         util.write_file(path, contents, mode=0o666)
+
+        self.assertTrue(os.path.exists(path))
+        self.assertTrue(os.path.isfile(path))
+        file_stat = os.stat(path)
+        self.assertEqual(0o666, stat.S_IMODE(file_stat.st_mode))
+
+    def test_copy_mode_no_existing(self):
+        """Verify that file is created with mode 0o644 if copy_mode
+        is true and there is no prior existing file."""
+        path = os.path.join(self.tmp, "NewFile.txt")
+        contents = "Hey there"
+
+        util.write_file(path, contents, copy_mode=True)
+
+        self.assertTrue(os.path.exists(path))
+        self.assertTrue(os.path.isfile(path))
+        file_stat = os.stat(path)
+        self.assertEqual(0o644, stat.S_IMODE(file_stat.st_mode))
+
+    def test_copy_mode_with_existing(self):
+        """Verify that file is created using mode of existing file
+        if copy_mode is true."""
+        path = os.path.join(self.tmp, "NewFile.txt")
+        contents = "Hey there"
+
+        open(path, 'w').close()
+        os.chmod(path, 0o666)
+
+        util.write_file(path, contents, copy_mode=True)
 
         self.assertTrue(os.path.exists(path))
         self.assertTrue(os.path.isfile(path))
@@ -267,6 +301,14 @@ class TestLoadYaml(helpers.TestCase):
                                         default=self.mydefault),
                          myobj)
 
+    def test_none_returns_default(self):
+        """If yaml.load returns None, then default should be returned."""
+        blobs = ("", " ", "# foo\n", "#")
+        mdef = self.mydefault
+        self.assertEqual(
+            [(b, self.mydefault) for b in blobs],
+            [(b, util.load_yaml(blob=b, default=mdef)) for b in blobs])
+
 
 class TestMountinfoParsing(helpers.ResourceUsingTestCase):
     def test_invalid_mountinfo(self):
@@ -324,6 +366,56 @@ class TestMountinfoParsing(helpers.ResourceUsingTestCase):
         expected = ('none', 'tmpfs', '/run/lock')
         self.assertEqual(expected, util.parse_mount_info('/run/lock', lines))
 
+    @mock.patch('cloudinit.util.subp')
+    def test_get_device_info_from_zpool(self, zpool_output):
+        # mock subp command from util.get_mount_info_fs_on_zpool
+        zpool_output.return_value = (
+            self.readResource('zpool_status_simple.txt'), ''
+        )
+        # save function return values and do asserts
+        ret = util.get_device_info_from_zpool('vmzroot')
+        self.assertEqual('gpt/system', ret)
+        self.assertIsNotNone(ret)
+
+    @mock.patch('cloudinit.util.subp')
+    def test_get_device_info_from_zpool_on_error(self, zpool_output):
+        # mock subp command from util.get_mount_info_fs_on_zpool
+        zpool_output.return_value = (
+            self.readResource('zpool_status_simple.txt'), 'error'
+        )
+        # save function return values and do asserts
+        ret = util.get_device_info_from_zpool('vmzroot')
+        self.assertIsNone(ret)
+
+    @mock.patch('cloudinit.util.subp')
+    def test_parse_mount_with_ext(self, mount_out):
+        mount_out.return_value = (self.readResource('mount_parse_ext.txt'), '')
+        # this one is valid and exists in mount_parse_ext.txt
+        ret = util.parse_mount('/var')
+        self.assertEqual(('/dev/mapper/vg00-lv_var', 'ext4', '/var'), ret)
+        # another one that is valid and exists
+        ret = util.parse_mount('/')
+        self.assertEqual(('/dev/mapper/vg00-lv_root', 'ext4', '/'), ret)
+        # this one exists in mount_parse_ext.txt
+        ret = util.parse_mount('/sys/kernel/debug')
+        self.assertIsNone(ret)
+        # this one does not even exist in mount_parse_ext.txt
+        ret = util.parse_mount('/not/existing/mount')
+        self.assertIsNone(ret)
+
+    @mock.patch('cloudinit.util.subp')
+    def test_parse_mount_with_zfs(self, mount_out):
+        mount_out.return_value = (self.readResource('mount_parse_zfs.txt'), '')
+        # this one is valid and exists in mount_parse_zfs.txt
+        ret = util.parse_mount('/var')
+        self.assertEqual(('vmzroot/ROOT/freebsd/var', 'zfs', '/var'), ret)
+        # this one is the root, valid and also exists in mount_parse_zfs.txt
+        ret = util.parse_mount('/')
+        self.assertEqual(('vmzroot/ROOT/freebsd', 'zfs', '/'), ret)
+        # this one does not even exist in mount_parse_ext.txt
+        ret = util.parse_mount('/not/existing/mount')
+        self.assertIsNone(ret)
+
 
 class TestReadDMIData(helpers.FilesystemMockingTestCase):
 
@@ -333,6 +425,9 @@ class TestReadDMIData(helpers.FilesystemMockingTestCase):
         self.addCleanup(shutil.rmtree, self.new_root)
         self.patchOS(self.new_root)
         self.patchUtils(self.new_root)
+        p = mock.patch("cloudinit.util.is_container", return_value=False)
+        self.addCleanup(p.stop)
+        self._m_is_container = p.start()
 
     def _create_sysfs_parent_directory(self):
         util.ensure_dir(os.path.join('sys', 'class', 'dmi', 'id'))
@@ -403,13 +498,13 @@ class TestReadDMIData(helpers.FilesystemMockingTestCase):
     def test_none_returned_if_neither_source_has_data(self):
         self.patch_mapping({})
         self._configure_dmidecode_return('key', 'value')
-        self.assertEqual(None, util.read_dmi_data('expect-fail'))
+        self.assertIsNone(util.read_dmi_data('expect-fail'))
 
     def test_none_returned_if_dmidecode_not_in_path(self):
         self.patched_funcs.enter_context(
             mock.patch.object(util, 'which', lambda _: False))
         self.patch_mapping({})
-        self.assertEqual(None, util.read_dmi_data('expect-fail'))
+        self.assertIsNone(util.read_dmi_data('expect-fail'))
 
     def test_dots_returned_instead_of_foxfox(self):
         # uninitialized dmi values show as \xff, return those as .
@@ -420,6 +515,64 @@ class TestReadDMIData(helpers.FilesystemMockingTestCase):
         sysfs_key = 'product_name'
         self._create_sysfs_file(sysfs_key, dmi_value)
         self.assertEqual(expected, util.read_dmi_data(dmi_key))
+
+    def test_container_returns_none(self):
+        """In a container read_dmi_data should always return None."""
+
+        # first verify we get the value if not in container
+        self._m_is_container.return_value = False
+        key, val = ("system-product-name", "my_product")
+        self._create_sysfs_file('product_name', val)
+        self.assertEqual(val, util.read_dmi_data(key))
+
+        # then verify in container returns None
+        self._m_is_container.return_value = True
+        self.assertIsNone(util.read_dmi_data(key))
+
+    def test_container_returns_none_on_unknown(self):
+        """In a container even bogus keys return None."""
+        self._m_is_container.return_value = True
+        self._create_sysfs_file('product_name', "should-be-ignored")
+        self.assertIsNone(util.read_dmi_data("bogus"))
+        self.assertIsNone(util.read_dmi_data("system-product-name"))
+
+
+class TestGetConfigLogfiles(helpers.CiTestCase):
+
+    def test_empty_cfg_returns_empty_list(self):
+        """An empty config passed to get_config_logfiles returns empty list."""
+        self.assertEqual([], util.get_config_logfiles(None))
+        self.assertEqual([], util.get_config_logfiles({}))
+
+    def test_default_log_file_present(self):
+        """When default_log_file is set get_config_logfiles finds it."""
+        self.assertEqual(
+            ['/my.log'],
+            util.get_config_logfiles({'def_log_file': '/my.log'}))
+
+    def test_output_logs_parsed_when_teeing_files(self):
+        """When output configuration is parsed when teeing files."""
+        self.assertEqual(
+            ['/himom.log', '/my.log'],
+            sorted(util.get_config_logfiles({
+                'def_log_file': '/my.log',
+                'output': {'all': '|tee -a /himom.log'}})))
+
+    def test_output_logs_parsed_when_redirecting(self):
+        """When output configuration is parsed when redirecting to a file."""
+        self.assertEqual(
+            ['/my.log', '/test.log'],
+            sorted(util.get_config_logfiles({
+                'def_log_file': '/my.log',
+                'output': {'all': '>/test.log'}})))
+
+    def test_output_logs_parsed_when_appending(self):
+        """When output configuration is parsed when appending to a file."""
+        self.assertEqual(
+            ['/my.log', '/test.log'],
+            sorted(util.get_config_logfiles({
+                'def_log_file': '/my.log',
+                'output': {'all': '>> /test.log'}})))
 
 
 class TestMultiLog(helpers.FilesystemMockingTestCase):
@@ -513,19 +666,39 @@ class TestReadSeeded(helpers.TestCase):
         self.assertEqual(found_ud, ud)
 
 
-class TestSubp(helpers.TestCase):
+class TestSubp(helpers.CiTestCase):
+    with_logs = True
 
-    stdin2err = ['bash', '-c', 'cat >&2']
+    stdin2err = [BASH, '-c', 'cat >&2']
     stdin2out = ['cat']
     utf8_invalid = b'ab\xaadef'
     utf8_valid = b'start \xc3\xa9 end'
     utf8_valid_2 = b'd\xc3\xa9j\xc8\xa7'
-    printenv = ['bash', '-c', 'for n in "$@"; do echo "$n=${!n}"; done', '--']
+    printenv = [BASH, '-c', 'for n in "$@"; do echo "$n=${!n}"; done', '--']
+    bogus_command = 'this-is-not-expected-to-be-a-program-name'
 
     def printf_cmd(self, *args):
         # bash's printf supports \xaa.  So does /usr/bin/printf
         # but by using bash, we remove dependency on another program.
-        return(['bash', '-c', 'printf "$@"', 'printf'] + list(args))
+        return([BASH, '-c', 'printf "$@"', 'printf'] + list(args))
+
+    def test_subp_handles_bytestrings(self):
+        """subp can run a bytestring command if shell is True."""
+        tmp_file = self.tmp_path('test.out')
+        cmd = 'echo HI MOM >> {tmp_file}'.format(tmp_file=tmp_file)
+        (out, _err) = util.subp(cmd.encode('utf-8'), shell=True)
+        self.assertEqual(u'', out)
+        self.assertEqual(u'', _err)
+        self.assertEqual('HI MOM\n', util.load_file(tmp_file))
+
+    def test_subp_handles_strings(self):
+        """subp can run a string command if shell is True."""
+        tmp_file = self.tmp_path('test.out')
+        cmd = 'echo HI MOM >> {tmp_file}'.format(tmp_file=tmp_file)
+        (out, _err) = util.subp(cmd, shell=True)
+        self.assertEqual(u'', out)
+        self.assertEqual(u'', _err)
+        self.assertEqual('HI MOM\n', util.load_file(tmp_file))
 
     def test_subp_handles_utf8(self):
         # The given bytes contain utf-8 accented characters as seen in e.g.
@@ -567,7 +740,8 @@ class TestSubp(helpers.TestCase):
     def test_subp_capture_stderr(self):
         data = b'hello world'
         (out, err) = util.subp(self.stdin2err, capture=True,
-                               decode=False, data=data)
+                               decode=False, data=data,
+                               update_env={'LC_ALL': 'C'})
         self.assertEqual(err, data)
         self.assertEqual(out, b'')
 
@@ -594,16 +768,105 @@ class TestSubp(helpers.TestCase):
         self.assertEqual(
             ['FOO=BAR', 'HOME=/myhome', 'K1=V1', 'K2=V2'], out.splitlines())
 
+    def test_subp_warn_missing_shebang(self):
+        """Warn on no #! in script"""
+        noshebang = self.tmp_path('noshebang')
+        util.write_file(noshebang, 'true\n')
+
+        os.chmod(noshebang, os.stat(noshebang).st_mode | stat.S_IEXEC)
+        self.assertRaisesRegex(util.ProcessExecutionError,
+                               'Missing #! in script\?',
+                               util.subp, (noshebang,))
+
     def test_returns_none_if_no_capture(self):
         (out, err) = util.subp(self.stdin2out, data=b'', capture=False)
-        self.assertEqual(err, None)
-        self.assertEqual(out, None)
+        self.assertIsNone(err)
+        self.assertIsNone(out)
+
+    def test_exception_has_out_err_are_bytes_if_decode_false(self):
+        """Raised exc should have stderr, stdout as bytes if no decode."""
+        with self.assertRaises(util.ProcessExecutionError) as cm:
+            util.subp([self.bogus_command], decode=False)
+        self.assertTrue(isinstance(cm.exception.stdout, bytes))
+        self.assertTrue(isinstance(cm.exception.stderr, bytes))
+
+    def test_exception_has_out_err_are_bytes_if_decode_true(self):
+        """Raised exc should have stderr, stdout as string if no decode."""
+        with self.assertRaises(util.ProcessExecutionError) as cm:
+            util.subp([self.bogus_command], decode=True)
+        self.assertTrue(isinstance(cm.exception.stdout, six.string_types))
+        self.assertTrue(isinstance(cm.exception.stderr, six.string_types))
 
     def test_bunch_of_slashes_in_path(self):
         self.assertEqual("/target/my/path/",
                          util.target_path("/target/", "//my/path/"))
         self.assertEqual("/target/my/path/",
                          util.target_path("/target/", "///my/path/"))
+
+    def test_c_lang_can_take_utf8_args(self):
+        """Independent of system LC_CTYPE, args can contain utf-8 strings.
+
+        When python starts up, its default encoding gets set based on
+        the value of LC_CTYPE.  If no system locale is set, the default
+        encoding for both python2 and python3 in some paths will end up
+        being ascii.
+
+        Attempts to use setlocale or patching (or changing) os.environ
+        in the current environment seem to not be effective.
+
+        This test starts up a python with LC_CTYPE set to C so that
+        the default encoding will be set to ascii.  In such an environment
+        Popen(['command', 'non-ascii-arg']) would cause a UnicodeDecodeError.
+        """
+        python_prog = '\n'.join([
+            'import json, sys',
+            'from cloudinit.util import subp',
+            'data = sys.stdin.read()',
+            'cmd = json.loads(data)',
+            'subp(cmd, capture=False)',
+            ''])
+        cmd = [BASH, '-c', 'echo -n "$@"', '--',
+               self.utf8_valid.decode("utf-8")]
+        python_subp = [sys.executable, '-c', python_prog]
+
+        out, _err = util.subp(
+            python_subp, update_env={'LC_CTYPE': 'C'},
+            data=json.dumps(cmd).encode("utf-8"),
+            decode=False)
+        self.assertEqual(self.utf8_valid, out)
+
+    def test_bogus_command_logs_status_messages(self):
+        """status_cb gets status messages logs on bogus commands provided."""
+        logs = []
+
+        def status_cb(log):
+            logs.append(log)
+
+        with self.assertRaises(util.ProcessExecutionError):
+            util.subp([self.bogus_command], status_cb=status_cb)
+
+        expected = [
+            'Begin run command: {cmd}\n'.format(cmd=self.bogus_command),
+            'ERROR: End run command: invalid command provided\n']
+        self.assertEqual(expected, logs)
+
+    def test_command_logs_exit_codes_to_status_cb(self):
+        """status_cb gets status messages containing command exit code."""
+        logs = []
+
+        def status_cb(log):
+            logs.append(log)
+
+        with self.assertRaises(util.ProcessExecutionError):
+            util.subp(['ls', '/I/dont/exist'], status_cb=status_cb)
+        util.subp(['ls'], status_cb=status_cb)
+
+        expected = [
+            'Begin run command: ls /I/dont/exist\n',
+            'ERROR: End run command: exit(2)\n',
+            'Begin run command: ls\n',
+            'End run command: exit(0)\n']
+        self.assertEqual(expected, logs)
 
 
 class TestEncode(helpers.TestCase):
@@ -681,5 +944,90 @@ class TestProcessExecutionError(helpers.TestCase):
                 '        error message',
             )).format(description=self.empty_description,
                       empty_attr=self.empty_attr))
+
+
+class TestSystemIsSnappy(helpers.FilesystemMockingTestCase):
+    def test_id_in_os_release_quoted(self):
+        """os-release containing ID="ubuntu-core" is snappy."""
+        orcontent = '\n'.join(['ID="ubuntu-core"', ''])
+        root_d = self.tmp_dir()
+        helpers.populate_dir(root_d, {'etc/os-release': orcontent})
+        self.reRoot(root_d)
+        self.assertTrue(util.system_is_snappy())
+
+    def test_id_in_os_release(self):
+        """os-release containing ID=ubuntu-core is snappy."""
+        orcontent = '\n'.join(['ID=ubuntu-core', ''])
+        root_d = self.tmp_dir()
+        helpers.populate_dir(root_d, {'etc/os-release': orcontent})
+        self.reRoot(root_d)
+        self.assertTrue(util.system_is_snappy())
+
+    @mock.patch('cloudinit.util.get_cmdline')
+    def test_bad_content_in_os_release_no_effect(self, m_cmdline):
+        """malformed os-release should not raise exception."""
+        m_cmdline.return_value = 'root=/dev/sda'
+        orcontent = '\n'.join(['IDubuntu-core', ''])
+        root_d = self.tmp_dir()
+        helpers.populate_dir(root_d, {'etc/os-release': orcontent})
+        self.reRoot()
+        self.assertFalse(util.system_is_snappy())
+
+    @mock.patch('cloudinit.util.get_cmdline')
+    def test_snap_core_in_cmdline_is_snappy(self, m_cmdline):
+        """The string snap_core= in kernel cmdline indicates snappy."""
+        cmdline = (
+            "BOOT_IMAGE=(loop)/kernel.img root=LABEL=writable "
+            "snap_core=core_x1.snap snap_kernel=pc-kernel_x1.snap ro "
+            "net.ifnames=0 init=/lib/systemd/systemd console=tty1 "
+            "console=ttyS0 panic=-1")
+        m_cmdline.return_value = cmdline
+        self.assertTrue(util.system_is_snappy())
+        self.assertTrue(m_cmdline.call_count > 0)
+
+    @mock.patch('cloudinit.util.get_cmdline')
+    def test_nothing_found_is_not_snappy(self, m_cmdline):
+        """If no positive identification, then not snappy."""
+        m_cmdline.return_value = 'root=/dev/sda'
+        self.reRoot()
+        self.assertFalse(util.system_is_snappy())
+        self.assertTrue(m_cmdline.call_count > 0)
+
+    @mock.patch('cloudinit.util.get_cmdline')
+    def test_channel_ini_with_snappy_is_snappy(self, m_cmdline):
+        """A Channel.ini file with 'ubuntu-core' indicates snappy."""
+        m_cmdline.return_value = 'root=/dev/sda'
+        root_d = self.tmp_dir()
+        content = '\n'.join(["[Foo]", "source = 'ubuntu-core'", ""])
+        helpers.populate_dir(
+            root_d, {'etc/system-image/channel.ini': content})
+        self.reRoot(root_d)
+        self.assertTrue(util.system_is_snappy())
+
+    @mock.patch('cloudinit.util.get_cmdline')
+    def test_system_image_config_dir_is_snappy(self, m_cmdline):
+        """Existence of /etc/system-image/config.d indicates snappy."""
+        m_cmdline.return_value = 'root=/dev/sda'
+        root_d = self.tmp_dir()
+        helpers.populate_dir(
+            root_d, {'etc/system-image/config.d/my.file': "_unused"})
+        self.reRoot(root_d)
+        self.assertTrue(util.system_is_snappy())
+
+
+class TestLoadShellContent(helpers.TestCase):
+    def test_comments_handled_correctly(self):
+        """Shell comments should be allowed in the content."""
+        self.assertEqual(
+            {'key1': 'val1', 'key2': 'val2', 'key3': 'val3 #tricky'},
+            util.load_shell_content('\n'.join([
+                "#top of file comment",
+                "key1=val1 #this is a comment",
+                "# second comment",
+                'key2="val2" # inlin comment'
+                '#badkey=wark',
+                'key3="val3 #tricky"',
+                ''])))
+
 
 # vi: ts=4 expandtab

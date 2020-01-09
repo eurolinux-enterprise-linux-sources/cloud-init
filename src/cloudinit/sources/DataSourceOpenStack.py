@@ -24,6 +24,9 @@ DEFAULT_METADATA = {
 
 
 class DataSourceOpenStack(openstack.SourceMixin, sources.DataSource):
+
+    dsname = "OpenStack"
+
     def __init__(self, sys_cfg, distro, paths):
         super(DataSourceOpenStack, self).__init__(sys_cfg, distro, paths)
         self.metadata_address = None
@@ -45,6 +48,7 @@ class DataSourceOpenStack(openstack.SourceMixin, sources.DataSource):
         # max_wait < 0 indicates do not wait
         max_wait = -1
         timeout = 10
+        retries = 5
 
         try:
             max_wait = int(self.ds_cfg.get("max_wait", max_wait))
@@ -55,7 +59,13 @@ class DataSourceOpenStack(openstack.SourceMixin, sources.DataSource):
             timeout = max(0, int(self.ds_cfg.get("timeout", timeout)))
         except Exception:
             util.logexc(LOG, "Failed to get timeout, using %s", timeout)
-        return (max_wait, timeout)
+
+        try:
+            retries = int(self.ds_cfg.get("retries", retries))
+        except Exception:
+            util.logexc(LOG, "Failed to get retries. using %s", retries)
+
+        return (max_wait, timeout, retries)
 
     def wait_for_metadata_service(self):
         urls = self.ds_cfg.get("metadata_urls", [DEF_MD_URL])
@@ -66,7 +76,7 @@ class DataSourceOpenStack(openstack.SourceMixin, sources.DataSource):
         if len(filtered):
             urls = filtered
         else:
-            LOG.warn("Empty metadata url list! using default list")
+            LOG.warning("Empty metadata url list! using default list")
             urls = [DEF_MD_URL]
 
         md_urls = []
@@ -76,7 +86,7 @@ class DataSourceOpenStack(openstack.SourceMixin, sources.DataSource):
             md_urls.append(md_url)
             url2base[md_url] = url
 
-        (max_wait, timeout) = self._get_url_settings()
+        (max_wait, timeout, retries) = self._get_url_settings()
         start_time = time.time()
         avail_url = url_helper.wait_for_url(urls=md_urls, max_wait=max_wait,
                                             timeout=timeout)
@@ -89,12 +99,14 @@ class DataSourceOpenStack(openstack.SourceMixin, sources.DataSource):
         self.metadata_address = url2base.get(avail_url)
         return bool(avail_url)
 
-    def get_data(self, retries=5, timeout=5):
+    def _get_data(self):
         try:
             if not self.wait_for_metadata_service():
                 return False
         except IOError:
             return False
+
+        (max_wait, timeout, retries) = self._get_url_settings()
 
         try:
             results = util.log_time(LOG.debug,
@@ -128,7 +140,7 @@ class DataSourceOpenStack(openstack.SourceMixin, sources.DataSource):
         try:
             self.vendordata_raw = sources.convert_vendordata(vd)
         except ValueError as e:
-            LOG.warn("Invalid content in vendor-data: %s", e)
+            LOG.warning("Invalid content in vendor-data: %s", e)
             self.vendordata_raw = None
 
         return True

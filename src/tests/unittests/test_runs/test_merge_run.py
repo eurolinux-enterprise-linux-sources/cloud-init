@@ -4,7 +4,7 @@ import os
 import shutil
 import tempfile
 
-from .. import helpers
+from cloudinit.tests import helpers
 
 from cloudinit.settings import PER_INSTANCE
 from cloudinit import stages
@@ -23,6 +23,7 @@ class TestMergeRun(helpers.FilesystemMockingTestCase):
         cfg = {
             'datasource_list': ['None'],
             'cloud_init_modules': ['write-files'],
+            'system_info': {'paths': {'run_dir': new_root}}
         }
         ud = self.readResource('user_data.1.txt')
         cloud_cfg = util.yaml_dumps(cfg)

@@ -1,19 +1,23 @@
 # This file is part of cloud-init. See LICENSE file for license information.
 
-from tests.cloud_tests import (config, LOG, util, testcases)
+"""Verify test results."""
 
 import os
 import unittest
 
+from tests.cloud_tests import (config, LOG, util, testcases)
 
-def verify_data(base_dir, tests):
+
+def verify_data(data_dir, platform, os_name, tests):
+    """Verify test data is correct.
+
+    @param data_dir: top level directory for all tests
+    @param platform: The platform name we for this test data (e.g. lxd)
+    @param os_name: The operating system under test (xenial, artful, etc.).
+    @param tests: list of test names
+    @return_value: {<test_name>: {passed: True/False, failures: []}}
     """
-    verify test data is correct,
-    base_dir: base directory for data
-    test_config: dict of all test config, from util.load_test_config()
-    tests: list of test names
-    return_value: {<test_name>: {passed: True/False, failures: []}}
-    """
+    base_dir = os.sep.join((data_dir, platform, os_name))
     runner = unittest.TextTestRunner(verbosity=util.current_verbosity())
     res = {}
     for test_name in tests:
@@ -25,10 +29,10 @@ def verify_data(base_dir, tests):
         cloud_conf = test_conf['cloud_config']
 
         # load script outputs
-        data = {}
+        data = {'platform': platform, 'os_name': os_name}
         test_dir = os.path.join(base_dir, test_name)
         for script_name in os.listdir(test_dir):
-            with open(os.path.join(test_dir, script_name), 'r') as fp:
+            with open(os.path.join(test_dir, script_name), 'rb') as fp:
                 data[script_name] = fp.read()
 
         # get test suite and launch tests
@@ -45,17 +49,18 @@ def verify_data(base_dir, tests):
         }
 
         for failure in res[test_name]['failures']:
-            LOG.warn('test case: %s failed %s.%s with: %s',
-                     test_name, failure['class'], failure['function'],
-                     failure['error'])
+            LOG.warning('test case: %s failed %s.%s with: %s',
+                        test_name, failure['class'], failure['function'],
+                        failure['error'])
 
     return res
 
 
 def verify(args):
-    """
-    verify test data
-    return_value: 0 for success, or number of failed tests
+    """Verify test data.
+
+    @param args: directory of test data
+    @return_value: 0 for success, or number of failed tests
     """
     failed = 0
     res = {}
@@ -71,7 +76,7 @@ def verify(args):
 
             # run test
             res[platform][os_name] = verify_data(
-                os.sep.join((args.data_dir, platform, os_name)),
+                args.data_dir, platform, os_name,
                 tests[platform][os_name])
 
             # handle results
@@ -80,7 +85,8 @@ def verify(args):
             if len(fail_list) == 0:
                 LOG.info('test: %s passed all tests', test_name)
             else:
-                LOG.warn('test: %s failed %s tests', test_name, len(fail_list))
+                LOG.warning('test: %s failed %s tests', test_name,
+                            len(fail_list))
             failed += len(fail_list)
 
     # dump results
