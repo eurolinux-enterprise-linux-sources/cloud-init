@@ -7,7 +7,7 @@
 
 Name:           cloud-init
 Version:        18.2
-Release:        1%{?dist}
+Release:        1%{?dist}.1
 Summary:        Cloud instance init scripts
 
 Group:          System Environment/Base
@@ -25,6 +25,14 @@ Patch0006: 0006-azure-ensure-that-networkmanager-hook-script-runs.patch
 Patch0007: 0007-sysconfig-Don-t-write-BOOTPROTO-dhcp-for-ipv6-dhcp.patch
 Patch0008: 0008-DataSourceAzure.py-use-hostnamectl-to-set-hostname.patch
 Patch0009: 0009-sysconfig-Don-t-disable-IPV6_AUTOCONF.patch
+# For bz#1633282 - [Azure] cloud-init fails to mount /dev/sdb1 after stop(deallocate)&&start VM
+Patch10: ci-Adding-systemd-mount-options-to-wait-for-cloud-init.patch
+# For bz#1633282 - [Azure] cloud-init fails to mount /dev/sdb1 after stop(deallocate)&&start VM
+Patch11: ci-Azure-Ignore-NTFS-mount-errors-when-checking-ephemer.patch
+# For bz#1633282 - [Azure] cloud-init fails to mount /dev/sdb1 after stop(deallocate)&&start VM
+Patch12: ci-azure-Add-reported-ready-marker-file.patch
+# For bz#1633282 - [Azure] cloud-init fails to mount /dev/sdb1 after stop(deallocate)&&start VM
+Patch13: ci-Adding-disk_setup-to-rhel-cloud.cfg.patch
 
 # Deal with noarch -> arch
 # https://bugzilla.redhat.com/show_bug.cgi?id=1067089
@@ -177,6 +185,14 @@ fi
 %config(noreplace) %{_sysconfdir}/rsyslog.d/21-cloudinit.conf
 
 %changelog
+* Thu Sep 27 2018 Miroslav Rezanina <mrezanin@redhat.com> - 18.2-1.el7_6.1
+- ci-Adding-systemd-mount-options-to-wait-for-cloud-init.patch [bz#1633282]
+- ci-Azure-Ignore-NTFS-mount-errors-when-checking-ephemer.patch [bz#1633282]
+- ci-azure-Add-reported-ready-marker-file.patch [bz#1633282]
+- ci-Adding-disk_setup-to-rhel-cloud.cfg.patch [bz#1633282]
+- Resolves: bz#1633282
+  ([Azure] cloud-init fails to mount /dev/sdb1 after stop(deallocate)&&start VM)
+
 * Thu Jun 21 2018 Miroslav Rezanina <mrezanin@redhat.com>
 - Rebase to 18.2
   Resolves: rhbz#1525267
