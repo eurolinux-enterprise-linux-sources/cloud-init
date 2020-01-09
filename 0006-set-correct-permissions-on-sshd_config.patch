@@ -1,0 +1,34 @@
+From 6ac3671698a058be19dc8c302e45724afa6e495c Mon Sep 17 00:00:00 2001
+From: Lars Kellogg-Stedman <lars@redhat.com>
+Date: Wed, 6 Jan 2016 09:32:33 -0500
+Subject: [PATCH 6/6] set correct permissions on sshd_config
+
+cc_set_passwords was using the default mode in a call to
+util.write_file, which was making /etc/ssh/sshd_config mode 0644 instead
+of mode 0600.
+
+This commit adds an explicit mode argument to ensure the correction
+permissions.
+---
+ cloudinit/config/cc_set_passwords.py | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/cloudinit/config/cc_set_passwords.py b/cloudinit/config/cc_set_passwords.py
+index 4a3b21a..9085f65 100644
+--- a/cloudinit/config/cc_set_passwords.py
++++ b/cloudinit/config/cc_set_passwords.py
+@@ -132,8 +132,9 @@ def handle(_name, cfg, cloud, log, args):
+                                                      'PasswordAuthentication',
+                                                      pw_auth))
+ 
+-        lines = [str(e) for e in new_lines]
+-        util.write_file(ssh_util.DEF_SSHD_CFG, "\n".join(lines))
++        lines = [str(l) for l in new_lines]
++        util.write_file(ssh_util.DEF_SSHD_CFG, "\n".join(lines),
++                        mode=0600)
+ 
+         try:
+             cmd = cloud.distro.init_cmd  # Default service
+-- 
+2.5.0
+
