@@ -9,7 +9,7 @@
 
 Name:           cloud-init
 Version:        0.7.5
-Release:        8%{?dist}.2
+Release:        8%{?dist}
 Summary:        Cloud instance init scripts
 
 Group:          System Environment/Base
@@ -28,13 +28,6 @@ Patch0006: 0006-set-correct-permissions-on-sshd_config.patch
 Patch0007: 0007-Openstack-Vendor-data-cleanup.patch
 Patch0008: 0008-Fix-slow-tests.patch
 Patch0009: 0009-OpenStack-Use-timeout-and-retries-from-config-in-get.patch
-Patch0010: 0010-AliYun-Add-new-datasource-for-Ali-Cloud-ECS.patch
-Patch0011: 0011-DatasourceEc2-add-warning-message-when-not-on-AWS.patch
-Patch0012: 0012-AliYun-Enable-platform-identification-and-enable-by-.patch
-Patch0013: 0013-Drop-reliance-on-dmidecode-executable.patch
-Patch0014: 0014-Fix-formatting-to-work-with-python-2.6.patch
-Patch0015: 0015-Use-either-syspath-or-dmidecode-based-on-the-availab.patch
-Patch0016: 0016-Convert-dmidecode-values-to-sysfs-names-before-looki.patch
 
 BuildRequires:  python-devel
 BuildRequires:  python-setuptools
@@ -77,13 +70,6 @@ ssh keys and to let the user run various scripts.
 %patch0007 -p1
 %patch0008 -p1
 %patch0009 -p1
-%patch0010 -p1
-%patch0011 -p1
-%patch0012 -p1
-%patch0013 -p1
-%patch0014 -p1
-%patch0015 -p1
-%patch0016 -p1
 
 cp -p %{SOURCE2} README.rhel
 
@@ -159,13 +145,6 @@ fi
 
 
 %changelog
-* Thu Oct 12 2017 Ryan McCabe <rmccabe@redhat.com> 0.7.5-8.2
-- Pull in additional patches to support AliCloud
-  Resolves: rhbz#1495471
-
-* Tue Sep 26 2017 Ryan McCabe <rmccabe@redhat.com> 0.7.5-8.1
-- Add support for the Alibaba cloud datasource (rhbz#1495471)
-
 * Fri May 12 2017 Lars Kellogg-Stedman <lars@redhat.com> 0.7.5-8
 - OpenStack: Use timeout and retries from config in get_data. (rhbz#1409951)
 
