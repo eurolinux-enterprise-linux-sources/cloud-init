@@ -95,6 +95,14 @@ class DataSourceOpenNebula(sources.DataSource):
         self.userdata_raw = results.get('userdata')
         return True
 
+    def _get_subplatform(self):
+        """Return the subplatform metadata source details."""
+        if self.seed_dir in self.seed:
+            subplatform_type = 'seed-dir'
+        else:
+            subplatform_type = 'config-disk'
+        return '%s (%s)' % (subplatform_type, self.seed)
+
     @property
     def network_config(self):
         if self.network is not None:
@@ -232,7 +240,7 @@ class OpenNebulaNetwork(object):
 
             # Set IPv6 default gateway
             gateway6 = self.get_gateway6(c_dev)
-            if gateway:
+            if gateway6:
                 devconf['gateway6'] = gateway6
 
             # Set DNS servers and search domains
@@ -378,7 +386,7 @@ def read_context_disk_dir(source_dir, asuser=None):
         if asuser is not None:
             try:
                 pwd.getpwnam(asuser)
-            except KeyError as e:
+            except KeyError:
                 raise BrokenContextDiskDir(
                     "configured user '{user}' does not exist".format(
                         user=asuser))

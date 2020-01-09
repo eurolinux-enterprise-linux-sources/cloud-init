@@ -1,0 +1,162 @@
+From 2428320b2157a0fcc0f35bea12584286ebd02aab Mon Sep 17 00:00:00 2001
+From: Eduardo Otubo <otubo@redhat.com>
+Date: Wed, 15 May 2019 12:15:25 +0200
+Subject: [PATCH 1/5] Azure: Ensure platform random_seed is always serializable
+ as JSON.
+
+RH-Author: Eduardo Otubo <otubo@redhat.com>
+Message-id: <20190515121529.11191-2-otubo@redhat.com>
+Patchwork-id: 87881
+O-Subject: [rhel-7 cloud-init PATCHv2 1/5] Azure: Ensure platform random_seed is always serializable as JSON.
+Bugzilla: 1687565
+RH-Acked-by: Vitaly Kuznetsov <vkuznets@redhat.com>
+RH-Acked-by: Mohammed Gamal <mgamal@redhat.com>
+
+From: "Jason Zions (MSFT)" <jasonzio@microsoft.com>
+
+BZ: 1687565
+BRANCH: rhel7/master-18.5
+UPSTREAM: 0dc3a77f
+BREW: 21696239
+
+commit 0dc3a77f41f4544e4cb5a41637af7693410d4cdf
+Author: Jason Zions (MSFT) <jasonzio@microsoft.com>
+Date:   Tue Mar 26 18:53:50 2019 +0000
+
+    Azure: Ensure platform random_seed is always serializable as JSON.
+
+    The Azure platform surfaces random bytes into /sys via Hyper-V.
+    Python 2.7 json.dump() raises an exception if asked to convert
+    a str with non-character content, and python 3.0 json.dump()
+    won't serialize a "bytes" value. As a result, c-i instance
+    data is often not written by Azure, making reboots slower (c-i
+    has to repeat work).
+
+    The random data is base64-encoded and then decoded into a string
+    (str or unicode depending on the version of Python in use). The
+    base64 string has just as many bits of entropy, so we're not
+    throwing away useful "information", but we can be certain
+    json.dump() will correctly serialize the bits.
+
+Signed-off-by: Miroslav Rezanina <mrezanin@redhat.com>
+
+Conflicts:
+    tests/unittests/test_datasource/test_azure.py
+    Skipped the commit edf052c as it removes support for python-2.6
+
+Signed-off-by: Eduardo Otubo <otubo@redhat.com>
+---
+ cloudinit/sources/DataSourceAzure.py          | 24 +++++++++++++++++++-----
+ tests/data/azure/non_unicode_random_string    |  1 +
+ tests/unittests/test_datasource/test_azure.py | 24 ++++++++++++++++++++++--
+ 3 files changed, 42 insertions(+), 7 deletions(-)
+ create mode 100644 tests/data/azure/non_unicode_random_string
+
+diff --git a/cloudinit/sources/DataSourceAzure.py b/cloudinit/sources/DataSourceAzure.py
+index 2062ca5..a768b2c 100644
+--- a/cloudinit/sources/DataSourceAzure.py
++++ b/cloudinit/sources/DataSourceAzure.py
+@@ -54,6 +54,7 @@ REPROVISION_MARKER_FILE = "/var/lib/cloud/data/poll_imds"
+ REPORTED_READY_MARKER_FILE = "/var/lib/cloud/data/reported_ready"
+ AGENT_SEED_DIR = '/var/lib/waagent'
+ IMDS_URL = "http://169.254.169.254/metadata/"
++PLATFORM_ENTROPY_SOURCE = "/sys/firmware/acpi/tables/OEM0"
+ 
+ # List of static scripts and network config artifacts created by
+ # stock ubuntu suported images.
+@@ -195,6 +196,8 @@ if util.is_FreeBSD():
+         RESOURCE_DISK_PATH = "/dev/" + res_disk
+     else:
+         LOG.debug("resource disk is None")
++    # TODO Find where platform entropy data is surfaced
++    PLATFORM_ENTROPY_SOURCE = None
+ 
+ BUILTIN_DS_CONFIG = {
+     'agent_command': AGENT_START_BUILTIN,
+@@ -1100,16 +1103,27 @@ def _check_freebsd_cdrom(cdrom_dev):
+     return False
+ 
+ 
+-def _get_random_seed():
++def _get_random_seed(source=PLATFORM_ENTROPY_SOURCE):
+     """Return content random seed file if available, otherwise,
+        return None."""
+     # azure / hyper-v provides random data here
+-    # TODO. find the seed on FreeBSD platform
+     # now update ds_cfg to reflect contents pass in config
+-    if util.is_FreeBSD():
++    if source is None:
+         return None
+-    return util.load_file("/sys/firmware/acpi/tables/OEM0",
+-                          quiet=True, decode=False)
++    seed = util.load_file(source, quiet=True, decode=False)
++
++    # The seed generally contains non-Unicode characters. load_file puts
++    # them into a str (in python 2) or bytes (in python 3). In python 2,
++    # bad octets in a str cause util.json_dumps() to throw an exception. In
++    # python 3, bytes is a non-serializable type, and the handler load_file
++    # uses applies b64 encoding *again* to handle it. The simplest solution
++    # is to just b64encode the data and then decode it to a serializable
++    # string. Same number of bits of entropy, just with 25% more zeroes.
++    # There's no need to undo this base64-encoding when the random seed is
++    # actually used in cc_seed_random.py.
++    seed = base64.b64encode(seed).decode()
++
++    return seed
+ 
+ 
+ def list_possible_azure_ds_devs():
+diff --git a/tests/data/azure/non_unicode_random_string b/tests/data/azure/non_unicode_random_string
+new file mode 100644
+index 0000000..b9ecefb
+--- /dev/null
++++ b/tests/data/azure/non_unicode_random_string
+@@ -0,0 +1 @@
++OEM0d\x00\x00\x00\x01\x80VRTUALMICROSFT\x02\x17\x00\x06MSFT\x97\x00\x00\x00C\xb4{V\xf4X%\x061x\x90\x1c\xfen\x86\xbf~\xf5\x8c\x94&\x88\xed\x84\xf9B\xbd\xd3\xf1\xdb\xee:\xd9\x0fc\x0e\x83(\xbd\xe3'\xfc\x85,\xdf\xf4\x13\x99N\xc5\xf3Y\x1e\xe3\x0b\xa4H\x08J\xb9\xdcdb$
+\ No newline at end of file
+diff --git a/tests/unittests/test_datasource/test_azure.py b/tests/unittests/test_datasource/test_azure.py
+index 417d86a..eacf225 100644
+--- a/tests/unittests/test_datasource/test_azure.py
++++ b/tests/unittests/test_datasource/test_azure.py
+@@ -7,11 +7,11 @@ from cloudinit.sources import (
+     UNSET, DataSourceAzure as dsaz, InvalidMetaDataException)
+ from cloudinit.util import (b64e, decode_binary, load_file, write_file,
+                             find_freebsd_part, get_path_dev_freebsd,
+-                            MountFailedError)
++                            MountFailedError, json_dumps, load_json)
+ from cloudinit.version import version_string as vs
+ from cloudinit.tests.helpers import (
+     HttprettyTestCase, CiTestCase, populate_dir, mock, wrap_and_call,
+-    ExitStack, PY26, SkipTest)
++    ExitStack, PY26, SkipTest, resourceLocation)
+ 
+ import crypt
+ import httpretty
+@@ -1924,4 +1924,24 @@ class TestWBIsPlatformViable(CiTestCase):
+             self.logs.getvalue())
+ 
+ 
++class TestRandomSeed(CiTestCase):
++    """Test proper handling of random_seed"""
++
++    def test_non_ascii_seed_is_serializable(self):
++        """Pass if a random string from the Azure infrastructure which
++        contains at least one non-Unicode character can be converted to/from
++        JSON without alteration and without throwing an exception.
++        """
++        path = resourceLocation("azure/non_unicode_random_string")
++        result = dsaz._get_random_seed(path)
++
++        obj = {'seed': result}
++        try:
++            serialized = json_dumps(obj)
++            deserialized = load_json(serialized)
++        except UnicodeDecodeError:
++            self.fail("Non-serializable random seed returned")
++
++        self.assertEqual(deserialized['seed'], result)
++
+ # vi: ts=4 expandtab
+-- 
+1.8.3.1
+

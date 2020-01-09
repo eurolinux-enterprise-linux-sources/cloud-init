@@ -6,8 +6,8 @@
 %global debug_package %{nil}
 
 Name:           cloud-init
-Version:        18.2
-Release:        1%{?dist}.2
+Version:        18.5
+Release:        3%{?dist}
 Summary:        Cloud instance init scripts
 
 Group:          System Environment/Base
@@ -20,21 +20,26 @@ Patch0001: 0001-Add-initial-redhat-setup.patch
 Patch0002: 0002-Do-not-write-NM_CONTROLLED-no-in-generated-interface.patch
 Patch0003: 0003-limit-permissions-on-def_log_file.patch
 Patch0004: 0004-remove-tee-command-from-logging-configuration.patch
-Patch0005: 0005-add-power-state-change-module-to-cloud_final_modules.patch
-Patch0006: 0006-azure-ensure-that-networkmanager-hook-script-runs.patch
-Patch0007: 0007-sysconfig-Don-t-write-BOOTPROTO-dhcp-for-ipv6-dhcp.patch
-Patch0008: 0008-DataSourceAzure.py-use-hostnamectl-to-set-hostname.patch
-Patch0009: 0009-sysconfig-Don-t-disable-IPV6_AUTOCONF.patch
-# For bz#1633282 - [Azure] cloud-init fails to mount /dev/sdb1 after stop(deallocate)&&start VM
-Patch10: ci-Adding-systemd-mount-options-to-wait-for-cloud-init.patch
-# For bz#1633282 - [Azure] cloud-init fails to mount /dev/sdb1 after stop(deallocate)&&start VM
-Patch11: ci-Azure-Ignore-NTFS-mount-errors-when-checking-ephemer.patch
-# For bz#1633282 - [Azure] cloud-init fails to mount /dev/sdb1 after stop(deallocate)&&start VM
-Patch12: ci-azure-Add-reported-ready-marker-file.patch
-# For bz#1633282 - [Azure] cloud-init fails to mount /dev/sdb1 after stop(deallocate)&&start VM
-Patch13: ci-Adding-disk_setup-to-rhel-cloud.cfg.patch
-# For bz#1684038 - EMBARGOED cloud-init: wrong list of ssh keys added to authorized_keys [rhel-7.6.z]
-Patch14: ci-azure-Filter-list-of-ssh-keys-pulled-from-fabric.patch
+Patch0005: 0005-azure-ensure-that-networkmanager-hook-script-runs.patch
+Patch0006: 0006-sysconfig-Don-t-write-BOOTPROTO-dhcp-for-ipv6-dhcp.patch
+Patch0007: 0007-DataSourceAzure.py-use-hostnamectl-to-set-hostname.patch
+Patch0008: 0008-sysconfig-Don-t-disable-IPV6_AUTOCONF.patch
+Patch0009: 0009-net-Wait-for-dhclient-to-daemonize-before-reading-le.patch
+Patch0010: 0010-cloud-init-per-don-t-use-dashes-in-sem-names.patch
+Patch0011: 0011-azure-Filter-list-of-ssh-keys-pulled-from-fabric.patch
+Patch0012: 0012-include-NOZEROCONF-yes-in-etc-sysconfig-network.patch
+# For bz#1687565 - cloud-init 18.5 rebase for fast provisioning on Azure [RHEL 7]
+Patch13: ci-Azure-Ensure-platform-random_seed-is-always-serializ.patch
+# For bz#1687565 - cloud-init 18.5 rebase for fast provisioning on Azure [RHEL 7]
+Patch14: ci-DatasourceAzure-add-additional-logging-for-azure-dat.patch
+# For bz#1687565 - cloud-init 18.5 rebase for fast provisioning on Azure [RHEL 7]
+Patch15: ci-Azure-Changes-to-the-Hyper-V-KVP-Reporter.patch
+# For bz#1687565 - cloud-init 18.5 rebase for fast provisioning on Azure [RHEL 7]
+Patch16: ci-DataSourceAzure-Adjust-timeout-for-polling-IMDS.patch
+# For bz#1687565 - cloud-init 18.5 rebase for fast provisioning on Azure [RHEL 7]
+Patch17: ci-cc_mounts-check-if-mount-a-on-no-change-fstab-path.patch
+# For bz#1707725 - [WALA][cloud] cloud-init dhclient-hook script has some unexpected side-effects on Azure
+Patch18: ci-Revert-azure-ensure-that-networkmanager-hook-script-.patch
 
 # Deal with noarch -> arch
 # https://bugzilla.redhat.com/show_bug.cgi?id=1067089
@@ -182,23 +187,54 @@ fi
 %dir /var/lib/cloud
 /etc/NetworkManager/dispatcher.d/cloud-init-azure-hook
 %{_udevrulesdir}/66-azure-ephemeral.rules
+%{_sysconfdir}/bash_completion.d/cloud-init
+%{_bindir}/cloud-id
 
 %dir %{_sysconfdir}/rsyslog.d
 %config(noreplace) %{_sysconfdir}/rsyslog.d/21-cloudinit.conf
 
 %changelog
-* Thu Mar 07 2019 Miroslav Rezanina <mrezanin@redhat.com> - 18.2-1.el7_6.2
-- ci-azure-Filter-list-of-ssh-keys-pulled-from-fabric.patch [bz#1684038]
-- Resolves: bz#1684038
-  (EMBARGOED cloud-init: wrong list of ssh keys added to authorized_keys [rhel-7.6.z])
+* Tue May 28 2019 Miroslav Rezanina <mrezanin@redhat.com> - 18.5-3.el7
+- ci-Revert-azure-ensure-that-networkmanager-hook-script-.patch [bz#1707725]
+- Resolves: bz#1707725
+  ([WALA][cloud] cloud-init dhclient-hook script has some unexpected side-effects on Azure)
 
-* Thu Sep 27 2018 Miroslav Rezanina <mrezanin@redhat.com> - 18.2-1.el7_6.1
-- ci-Adding-systemd-mount-options-to-wait-for-cloud-init.patch [bz#1633282]
-- ci-Azure-Ignore-NTFS-mount-errors-when-checking-ephemer.patch [bz#1633282]
-- ci-azure-Add-reported-ready-marker-file.patch [bz#1633282]
-- ci-Adding-disk_setup-to-rhel-cloud.cfg.patch [bz#1633282]
-- Resolves: bz#1633282
-  ([Azure] cloud-init fails to mount /dev/sdb1 after stop(deallocate)&&start VM)
+* Fri May 17 2019 Miroslav Rezanina <mrezanin@redhat.com> - 18.5-2.el7
+- ci-Azure-Ensure-platform-random_seed-is-always-serializ.patch [bz#1687565]
+- ci-DatasourceAzure-add-additional-logging-for-azure-dat.patch [bz#1687565]
+- ci-Azure-Changes-to-the-Hyper-V-KVP-Reporter.patch [bz#1687565]
+- ci-DataSourceAzure-Adjust-timeout-for-polling-IMDS.patch [bz#1687565]
+- ci-cc_mounts-check-if-mount-a-on-no-change-fstab-path.patch [bz#1687565]
+- Resolves: bz#1687565
+  (cloud-init 18.5 rebase for fast provisioning on Azure [RHEL 7])
+
+* Thu Mar 28 2019 Miroslav Rezanina <mrezanin@redhat.com> - 18.5-1.el7
+- Rebase to 18.5 [bz#1687565]
+- Resolves: bz#1687565
+  (cloud-init 18.5 rebase for fast provisioning on Azure [RHEL 7])
+
+* Mon Mar 25 2019 Miroslav Rezanina <mrezanin@redhat.com> - 18.2-5.el7
+- ci-include-NOZEROCONF-yes-in-etc-sysconfig-network.patch [bz#1653131]
+- Resolves: bz#1653131
+  (cloud-init remove 'NOZEROCONF=yes' from /etc/sysconfig/network)
+
+* Tue Mar 19 2019 Miroslav Rezanina <mrezanin@redhat.com> - 18.2-4.el7
+- ci-azure-Filter-list-of-ssh-keys-pulled-from-fabric.patch [bz#1684040]
+- Resolves: bz#1684040
+  (CVE-2019-0816 cloud-init: extra ssh keys added to authorized_keys [rhel-7.7])
+
+* Tue Mar 05 2019 Miroslav Rezanina <mrezanin@redhat.com> - 18.2-3.el7
+- ci-cloud-init-per-don-t-use-dashes-in-sem-names.patch [bz#1664876]
+- ci-Enable-cloud-init-by-default-on-vmware.patch [bz#1623281]
+- Resolves: bz#1623281
+  ([ESXi][RHEL7.6]Enable cloud-init by default on VMware)
+- Resolves: bz#1664876
+  (cloud-init Storage-Management Functionality Is Erasing Filesystems)
+
+* Thu Jan 31 2019 Miroslav Rezanina <mrezanin@redhat.com> - 18.2-2.el7
+- ci-net-Wait-for-dhclient-to-daemonize-before-reading-le.patch [bz#1632967]
+- Resolves: bz#1632967
+  ([Azure] cloud-init dhcp.py dhcp_discovery() race with dhclient with preprovisioned VM in Azure)
 
 * Thu Jun 21 2018 Miroslav Rezanina <mrezanin@redhat.com>
 - Rebase to 18.2

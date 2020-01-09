@@ -1,0 +1,89 @@
+From f8d348243bd32fe3c3f0b55c2a216e95d44c5abd Mon Sep 17 00:00:00 2001
+From: Eduardo Otubo <otubo@redhat.com>
+Date: Thu, 28 Feb 2019 12:38:36 +0100
+Subject: cloud-init-per: don't use dashes in sem names
+
+RH-Author: Eduardo Otubo <otubo@redhat.com>
+Message-id: <20190228123836.17979-1-otubo@redhat.com>
+Patchwork-id: 84743
+O-Subject: [RHEL-7.7 cloud-init PATCH] This is to fix https://bugs.launchpad.net/cloud-init/+bug/1812676
+Bugzilla: 1664876
+RH-Acked-by: Mohammed Gamal <mgamal@redhat.com>
+RH-Acked-by: Vitaly Kuznetsov <vkuznets@redhat.com>
+
+From: Vitaly Kuznetsov <vkuznets@redhat.com>
+
+    It was found that when there is a dash in cloud-init-per command
+    name and cloud-init-per is executed through cloud-init's bootcmd, e.g:
+
+    bootcmd:
+     - cloud-init-per instance mycmd-bootcmd /usr/bin/mycmd
+
+    the command is executed on each boot. However, running the same
+    cloud-init-per command manually after boot doesn't reveal the issue. Turns
+    out the issue comes from 'migrator' cloud-init module which renames all
+    files in /var/lib/cloud/instance/sem/ replacing dashes with underscores. As
+    migrator runs before bootcmd it renames
+
+    /var/lib/cloud/instance/sem/bootper.mycmd-bootcmd.instance
+    to
+    /var/lib/cloud/instance/sem/bootper.mycmd_bootcmd.instance
+
+    so cloud-init-per doesn't see it and thinks that the comment was never ran
+    before. On next boot the sequence repeats.
+
+    There are multiple ways to resolve the issue. This patch takes the
+    following approach: 'canonicalize' sem names by replacing dashes with
+    underscores (this is consistent with post-'migrator' contents of
+    /var/lib/cloud/instance/sem/). We, however, need to be careful: in case
+    someone had a command with dashes before and he had migrator module enables
+    we need to see the old sem file (or the command will run again and this can
+    be as bad as formatting a partition!) so we add a small 'migrator' part to
+    cloud-init-per script itself checking for legacy sem names.
+
+    Signed-off-by: Vitaly Kuznetsov <vkuznets@redhat.com>
+
+commit 9cf9d8cdd3a8fd7d4d425f7051122d0ac8af2bbd
+Author: Vitaly Kuznetsov <vkuznets@redhat.com>
+Date:   Mon Feb 18 22:55:49 2019 +0000
+
+    This is to fix https://bugs.launchpad.net/cloud-init/+bug/1812676
+
+Resolves: rhbz#1664876
+X-downstream-only: false
+
+Signed-off-by: Eduardo Otubo <otubo@redhat.com>
+Signed-off-by: Miroslav Rezanina <mrezanin@redhat.com>
+---
+ tools/cloud-init-per | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/tools/cloud-init-per b/tools/cloud-init-per
+index 7d6754b..eae3e93 100755
+--- a/tools/cloud-init-per
++++ b/tools/cloud-init-per
+@@ -38,7 +38,7 @@ fi
+ [ "$1" = "-h" -o "$1" = "--help" ] && { Usage ; exit 0; }
+ [ $# -ge 3 ] || { Usage 1>&2; exit 1; }
+ freq=$1
+-name=$2
++name=${2/-/_}
+ shift 2;
+ 
+ [ "${name#*/}" = "${name}" ] || fail "name cannot contain a /"
+@@ -53,6 +53,12 @@ esac
+ [ -d "${sem%/*}" ] || mkdir -p "${sem%/*}" ||
+    fail "failed to make directory for ${sem}"
+ 
++# Rename legacy sem files with dashes in their names. Do not overwrite existing
++# sem files to prevent clobbering those which may have been created from calls
++# outside of cloud-init.
++sem_legacy="${sem/_/-}"
++[ "$sem" != "$sem_legacy" -a -e "$sem_legacy" ] && mv -n "$sem_legacy" "$sem"
++
+ [ "$freq" != "always" -a -e "$sem" ] && exit 0
+ "$@"
+ ret=$?
+-- 
+1.8.3.1
+

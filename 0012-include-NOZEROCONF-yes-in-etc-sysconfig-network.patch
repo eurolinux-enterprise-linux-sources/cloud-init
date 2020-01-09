@@ -1,0 +1,65 @@
+From 320cbee1530952d31e9e0a3047ba292e0d6d16fc Mon Sep 17 00:00:00 2001
+From: Eduardo Otubo <otubo@redhat.com>
+Date: Wed, 20 Mar 2019 11:45:59 +0100
+Subject: include 'NOZEROCONF=yes' in /etc/sysconfig/network
+
+RH-Author: Eduardo Otubo <otubo@redhat.com>
+Message-id: <20190320114559.23708-1-otubo@redhat.com>
+Patchwork-id: 84937
+O-Subject: [RHEL-7.7 cloud-init PATCH] include 'NOZEROCONF=yes' in /etc/sysconfig/network
+Bugzilla: 1653131
+RH-Acked-by: Cathy Avery <cavery@redhat.com>
+RH-Acked-by: Mohammed Gamal <mgamal@redhat.com>
+RH-Acked-by: Vitaly Kuznetsov <vkuznets@redhat.com>
+
+The option NOZEROCONF=yes is not included by default in
+/etc/sysconfig/network, which is required by Overcloud instances. The
+patch also includes tests for the modifications.
+
+X-downstream-only: yes
+Resolves: rhbz#1653131
+
+Signed-off-by: Eduardo Otubo <otubo@redhat.com>
+Signed-off-by: Miroslav Rezanina <mrezanin@redhat.com>
+---
+ cloudinit/net/sysconfig.py  | 11 ++++++++++-
+ tests/unittests/test_net.py |  1 -
+ 2 files changed, 10 insertions(+), 2 deletions(-)
+
+diff --git a/cloudinit/net/sysconfig.py b/cloudinit/net/sysconfig.py
+index ae0554e..d94c1f5 100644
+--- a/cloudinit/net/sysconfig.py
++++ b/cloudinit/net/sysconfig.py
+@@ -661,7 +661,16 @@ class Renderer(renderer.Renderer):
+         # Distros configuring /etc/sysconfig/network as a file e.g. Centos
+         if sysconfig_path.endswith('network'):
+             util.ensure_dir(os.path.dirname(sysconfig_path))
+-            netcfg = [_make_header(), 'NETWORKING=yes']
++            netcfg = []
++            for line in util.load_file(sysconfig_path, quiet=True).split('\n'):
++                if 'cloud-init' in line:
++                    break
++                if not line.startswith(('NETWORKING=',
++                                        'IPV6_AUTOCONF=',
++                                        'NETWORKING_IPV6=')):
++                    netcfg.append(line)
++            # Now generate the cloud-init portion of sysconfig/network
++            netcfg.extend([_make_header(), 'NETWORKING=yes'])
+             if network_state.use_ipv6:
+                 netcfg.append('NETWORKING_IPV6=yes')
+                 netcfg.append('IPV6_AUTOCONF=no')
+diff --git a/tests/unittests/test_net.py b/tests/unittests/test_net.py
+index 8bcafe0..5f1aa3e 100644
+--- a/tests/unittests/test_net.py
++++ b/tests/unittests/test_net.py
+@@ -886,7 +886,6 @@ pre-down route del -net 10.0.0.0 netmask 255.0.0.0 gw 11.0.0.1 metric 3 || true
+                 BOOTPROTO=none
+                 DEVICE=bond0
+                 DHCPV6C=yes
+-                IPV6_AUTOCONF=no
+                 IPV6INIT=yes
+                 MACADDR=aa:bb:cc:dd:ee:ff
+                 ONBOOT=yes
+-- 
+1.8.3.1
+

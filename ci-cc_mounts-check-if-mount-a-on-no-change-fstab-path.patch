@@ -1,0 +1,135 @@
+From e3f04e297ce950ce0d183ca87a434ec932ae6a86 Mon Sep 17 00:00:00 2001
+From: Eduardo Otubo <otubo@redhat.com>
+Date: Wed, 15 May 2019 12:15:29 +0200
+Subject: [PATCH 5/5] cc_mounts: check if mount -a on no-change fstab path
+
+RH-Author: Eduardo Otubo <otubo@redhat.com>
+Message-id: <20190515121529.11191-6-otubo@redhat.com>
+Patchwork-id: 87886
+O-Subject: [rhel-7 cloud-init PATCHv2 5/5] cc_mounts: check if mount -a on no-change fstab path
+Bugzilla: 1687565
+RH-Acked-by: Vitaly Kuznetsov <vkuznets@redhat.com>
+RH-Acked-by: Mohammed Gamal <mgamal@redhat.com>
+
+From: "Jason Zions (MSFT)" <jasonzio@microsoft.com>
+
+BZ: 1687565
+BRANCH: rhel7/master-18.5
+UPSTREAM: acc25d8d
+BREW: 21696239
+
+commit acc25d8d7d603313059ac35b4253b504efc560a9
+Author: Jason Zions (MSFT) <jasonzio@microsoft.com>
+Date:   Wed May 8 22:47:07 2019 +0000
+
+    cc_mounts: check if mount -a on no-change fstab path
+
+    Under some circumstances, cc_disk_setup may reformat volumes which
+    already appear in /etc/fstab (e.g. Azure ephemeral drive is reformatted
+    from NTFS to ext4 after service-heal). Normally, cc_mounts only calls
+    mount -a if it altered /etc/fstab. With this change cc_mounts will read
+    /proc/mounts and verify if configured mounts are already mounted and if
+    not raise flag to request a mount -a.  This handles the case where no
+    changes to fstab occur but a mount -a is required due to change in
+    underlying device which prevented the .mount unit from running until
+    after disk was reformatted.
+
+    LP: #1825596
+
+Signed-off-by: Eduardo Otubo <otubo@redhat.com>
+Signed-off-by: Miroslav Rezanina <mrezanin@redhat.com>
+---
+ cloudinit/config/cc_mounts.py                      | 11 ++++++++
+ .../unittests/test_handler/test_handler_mounts.py  | 30 +++++++++++++++++++++-
+ 2 files changed, 40 insertions(+), 1 deletion(-)
+
+diff --git a/cloudinit/config/cc_mounts.py b/cloudinit/config/cc_mounts.py
+index 339baba..123ffb8 100644
+--- a/cloudinit/config/cc_mounts.py
++++ b/cloudinit/config/cc_mounts.py
+@@ -439,6 +439,7 @@ def handle(_name, cfg, cloud, log, _args):
+ 
+     cc_lines = []
+     needswap = False
++    need_mount_all = False
+     dirs = []
+     for line in actlist:
+         # write 'comment' in the fs_mntops, entry,  claiming this
+@@ -449,11 +450,18 @@ def handle(_name, cfg, cloud, log, _args):
+             dirs.append(line[1])
+         cc_lines.append('\t'.join(line))
+ 
++    mount_points = [v['mountpoint'] for k, v in util.mounts().items()
++                    if 'mountpoint' in v]
+     for d in dirs:
+         try:
+             util.ensure_dir(d)
+         except Exception:
+             util.logexc(log, "Failed to make '%s' config-mount", d)
++        # dirs is list of directories on which a volume should be mounted.
++        # If any of them does not already show up in the list of current
++        # mount points, we will definitely need to do mount -a.
++        if not need_mount_all and d not in mount_points:
++            need_mount_all = True
+ 
+     sadds = [WS.sub(" ", n) for n in cc_lines]
+     sdrops = [WS.sub(" ", n) for n in fstab_removed]
+@@ -473,6 +481,9 @@ def handle(_name, cfg, cloud, log, _args):
+         log.debug("No changes to /etc/fstab made.")
+     else:
+         log.debug("Changes to fstab: %s", sops)
++        need_mount_all = True
++
++    if need_mount_all:
+         activate_cmds.append(["mount", "-a"])
+         if uses_systemd:
+             activate_cmds.append(["systemctl", "daemon-reload"])
+diff --git a/tests/unittests/test_handler/test_handler_mounts.py b/tests/unittests/test_handler/test_handler_mounts.py
+index 8fea6c2..0fb160b 100644
+--- a/tests/unittests/test_handler/test_handler_mounts.py
++++ b/tests/unittests/test_handler/test_handler_mounts.py
+@@ -154,7 +154,15 @@ class TestFstabHandling(test_helpers.FilesystemMockingTestCase):
+                        return_value=True)
+ 
+         self.add_patch('cloudinit.config.cc_mounts.util.subp',
+-                       'mock_util_subp')
++                       'm_util_subp')
++
++        self.add_patch('cloudinit.config.cc_mounts.util.mounts',
++                       'mock_util_mounts',
++                       return_value={
++                           '/dev/sda1': {'fstype': 'ext4',
++                                         'mountpoint': '/',
++                                         'opts': 'rw,relatime,discard'
++                                         }})
+ 
+         self.mock_cloud = mock.Mock()
+         self.mock_log = mock.Mock()
+@@ -230,4 +238,24 @@ class TestFstabHandling(test_helpers.FilesystemMockingTestCase):
+             fstab_new_content = fd.read()
+             self.assertEqual(fstab_expected_content, fstab_new_content)
+ 
++    def test_no_change_fstab_sets_needs_mount_all(self):
++        '''verify unchanged fstab entries are mounted if not call mount -a'''
++        fstab_original_content = (
++            'LABEL=cloudimg-rootfs / ext4 defaults 0 0\n'
++            'LABEL=UEFI /boot/efi vfat defaults 0 0\n'
++            '/dev/vdb /mnt auto defaults,noexec,comment=cloudconfig 0 2\n'
++        )
++        fstab_expected_content = fstab_original_content
++        cc = {'mounts': [
++                 ['/dev/vdb', '/mnt', 'auto', 'defaults,noexec']]}
++        with open(cc_mounts.FSTAB_PATH, 'w') as fd:
++            fd.write(fstab_original_content)
++        with open(cc_mounts.FSTAB_PATH, 'r') as fd:
++            fstab_new_content = fd.read()
++            self.assertEqual(fstab_expected_content, fstab_new_content)
++        cc_mounts.handle(None, cc, self.mock_cloud, self.mock_log, [])
++        self.m_util_subp.assert_has_calls([
++            mock.call(['mount', '-a']),
++            mock.call(['systemctl', 'daemon-reload'])])
++
+ # vi: ts=4 expandtab
+-- 
+1.8.3.1
+

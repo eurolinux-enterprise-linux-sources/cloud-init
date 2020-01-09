@@ -130,7 +130,6 @@ class TestAliYunDatasource(test_helpers.HttprettyTestCase):
                          self.ds.get_hostname())
 
     @mock.patch("cloudinit.sources.DataSourceAliYun._is_aliyun")
-    @httpretty.activate
     def test_with_mock_server(self, m_is_aliyun):
         m_is_aliyun.return_value = True
         self.regist_default_server()
@@ -141,9 +140,12 @@ class TestAliYunDatasource(test_helpers.HttprettyTestCase):
         self._test_get_sshkey()
         self._test_get_iid()
         self._test_host_name()
+        self.assertEqual('aliyun', self.ds.cloud_name)
+        self.assertEqual('ec2', self.ds.platform)
+        self.assertEqual(
+           'metadata (http://100.100.100.200)', self.ds.subplatform)
 
     @mock.patch("cloudinit.sources.DataSourceAliYun._is_aliyun")
-    @httpretty.activate
     def test_returns_false_when_not_on_aliyun(self, m_is_aliyun):
         """If is_aliyun returns false, then get_data should return False."""
         m_is_aliyun.return_value = False

@@ -109,6 +109,10 @@ class DataSourceMAAS(sources.DataSource):
                 LOG.warning("Invalid content in vendor-data: %s", e)
                 self.vendordata_raw = None
 
+    def _get_subplatform(self):
+        """Return the subplatform metadata source details."""
+        return 'seed-dir (%s)' % self.base_url
+
     def wait_for_metadata_service(self, url):
         mcfg = self.ds_cfg
         max_wait = 120
@@ -198,13 +202,13 @@ def read_maas_seed_url(seed_url, read_file_or_url=None, timeout=None,
     If version is None, then <version>/ will not be used.
     """
     if read_file_or_url is None:
-        read_file_or_url = util.read_file_or_url
+        read_file_or_url = url_helper.read_file_or_url
 
     if seed_url.endswith("/"):
         seed_url = seed_url[:-1]
 
     md = {}
-    for path, dictname, binary, optional in DS_FIELDS:
+    for path, _dictname, binary, optional in DS_FIELDS:
         if version is None:
             url = "%s/%s" % (seed_url, path)
         else:

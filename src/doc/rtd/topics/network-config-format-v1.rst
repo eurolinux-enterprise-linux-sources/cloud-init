@@ -130,6 +130,18 @@ the bond interfaces.
 The ``bond_interfaces`` key accepts a list of network device ``name`` values
 from the configuration.  This list may be empty.
 
+**mtu**: *<MTU SizeBytes>*
+
+The MTU key represents a device's Maximum Transmission Unit, the largest size
+packet or frame, specified in octets (eight-bit bytes), that can be sent in a
+packet- or frame-based network.  Specifying ``mtu`` is optional.
+
+.. note::
+
+  The possible supported values of a device's MTU is not available at
+  configuration time.  It's possible to specify a value too large or to
+  small for a device and may be ignored by the device.
+
 **params**:  *<Dictionary of key: value bonding parameter pairs>*
 
 The ``params`` key in a bond holds a dictionary of bonding parameters.
@@ -268,6 +280,21 @@ Type ``vlan`` requires the following keys:
 - ``vlan_link``: Specify the underlying link via its ``name``.
 - ``vlan_id``: Specify the VLAN numeric id.
 
+The following optional keys are supported:
+
+**mtu**: *<MTU SizeBytes>*
+
+The MTU key represents a device's Maximum Transmission Unit, the largest size
+packet or frame, specified in octets (eight-bit bytes), that can be sent in a
+packet- or frame-based network.  Specifying ``mtu`` is optional.
+
+.. note::
+
+  The possible supported values of a device's MTU is not available at
+  configuration time.  It's possible to specify a value too large or to
+  small for a device and may be ignored by the device.
+
+
 **VLAN Example**::
 
    network:
@@ -357,7 +384,7 @@ Valid keys for ``subnets`` include the following:
 - ``address``: IPv4 or IPv6 address.  It may include CIDR netmask notation.
 - ``netmask``: IPv4 subnet mask in dotted format or CIDR notation.
 - ``gateway``: IPv4 address of the default gateway for this subnet.
-- ``dns_nameserver``: Specify a list of IPv4 dns server IPs to end up in
+- ``dns_nameservers``: Specify a list of IPv4 dns server IPs to end up in
   resolv.conf.
 - ``dns_search``: Specify a list of search paths to be included in
   resolv.conf.

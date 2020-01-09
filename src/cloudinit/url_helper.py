@@ -15,6 +15,7 @@ import six
 import time
 
 from email.utils import parsedate
+from errno import ENOENT
 from functools import partial
 from itertools import count
 from requests import exceptions
@@ -80,6 +81,32 @@ def combine_url(base, *add_ons):
     return url
 
 
+def read_file_or_url(url, timeout=5, retries=10,
+                     headers=None, data=None, sec_between=1, ssl_details=None,
+                     headers_cb=None, exception_cb=None):
+    url = url.lstrip()
+    if url.startswith("/"):
+        url = "file://%s" % url
+    if url.lower().startswith("file://"):
+        if data:
+            LOG.warning("Unable to post data to file resource %s", url)
+        file_path = url[len("file://"):]
+        try:
+            with open(file_path, "rb") as fp:
+                contents = fp.read()
+        except IOError as e:
+            code = e.errno
+            if e.errno == ENOENT:
+                code = NOT_FOUND
+            raise UrlError(cause=e, code=code, headers=None, url=url)
+        return FileResponse(file_path, contents=contents)
+    else:
+        return readurl(url, timeout=timeout, retries=retries, headers=headers,
+                       headers_cb=headers_cb, data=data,
+                       sec_between=sec_between, ssl_details=ssl_details,
+                       exception_cb=exception_cb)
+
+
 # Made to have same accessors as UrlResponse so that the
 # read_file_or_url can return this or that object and the
 # 'user' of those objects will not need to know the difference.
@@ -96,7 +123,7 @@ class StringResponse(object):
         return True
 
     def __str__(self):
-        return self.contents
+        return self.contents.decode('utf-8')
 
 
 class FileResponse(StringResponse):
@@ -172,7 +199,7 @@ def _get_ssl_args(url, ssl_details):
 def readurl(url, data=None, timeout=None, retries=0, sec_between=1,
             headers=None, headers_cb=None, ssl_details=None,
             check_status=True, allow_redirects=True, exception_cb=None,
-            session=None, infinite=False):
+            session=None, infinite=False, log_req_resp=True):
     url = _cleanurl(url)
     req_args = {
         'url': url,
@@ -229,9 +256,11 @@ def readurl(url, data=None, timeout=None, retries=0, sec_between=1,
                 continue
             filtered_req_args[k] = v
         try:
-            LOG.debug("[%s/%s] open '%s' with %s configuration", i,
-                      "infinite" if infinite else manual_tries, url,
-                      filtered_req_args)
+
+            if log_req_resp:
+                LOG.debug("[%s/%s] open '%s' with %s configuration", i,
+                          "infinite" if infinite else manual_tries, url,
+                          filtered_req_args)
 
             if session is None:
                 session = requests.Session()
@@ -267,8 +296,11 @@ def readurl(url, data=None, timeout=None, retries=0, sec_between=1,
                 break
             if (infinite and sec_between > 0) or \
                (i + 1 < manual_tries and sec_between > 0):
-                LOG.debug("Please wait %s seconds while we wait to try again",
-                          sec_between)
+
+                if log_req_resp:
+                    LOG.debug(
+                        "Please wait %s seconds while we wait to try again",
+                        sec_between)
                 time.sleep(sec_between)
     if excps:
         raise excps[-1]
@@ -519,7 +551,21 @@ def oauth_headers(url, consumer_key, token_key, token_secret, consumer_secret,
         resource_owner_secret=token_secret,
         signature_method=oauth1.SIGNATURE_PLAINTEXT,
         timestamp=timestamp)
-    uri, signed_headers, body = client.sign(url)
+    _uri, signed_headers, _body = client.sign(url)
     return signed_headers
+
+
+def retry_on_url_exc(msg, exc):
+    """readurl exception_cb that will retry on NOT_FOUND and Timeout.
+
+    Returns False to raise the exception from readurl, True to retry.
+    """
+    if not isinstance(exc, UrlError):
+        return False
+    if exc.code == NOT_FOUND:
+        return True
+    if exc.cause and isinstance(exc.cause, requests.Timeout):
+        return True
+    return False
 
 # vi: ts=4 expandtab

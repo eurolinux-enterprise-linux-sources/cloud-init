@@ -1,13 +1,13 @@
-From a584b587a61e7fb7b29f915600021ce51d0ab558 Mon Sep 17 00:00:00 2001
+From fc47793e3fedeafdb19e3c3adfbb9c2be82b64c0 Mon Sep 17 00:00:00 2001
 From: Eduardo Otubo <otubo@redhat.com>
-Date: Wed, 6 Mar 2019 14:18:01 +0100
-Subject: [PATCH] azure: Filter list of ssh keys pulled from fabric
+Date: Wed, 6 Mar 2019 14:20:18 +0100
+Subject: azure: Filter list of ssh keys pulled from fabric
 
 RH-Author: Eduardo Otubo <otubo@redhat.com>
-Message-id: <20190306141801.8647-1-otubo@redhat.com>
-Patchwork-id: 84806
-O-Subject: [RHEL-7.6.z cloud-init PATCH] azure: Filter list of ssh keys pulled from fabric
-Bugzilla: 1684038
+Message-id: <20190306142018.8902-1-otubo@redhat.com>
+Patchwork-id: 84807
+O-Subject: [RHEL-7.7 cloud-init PATCH] azure: Filter list of ssh keys pulled from fabric
+Bugzilla: 1684040
 RH-Acked-by: Cathy Avery <cavery@redhat.com>
 RH-Acked-by: Vitaly Kuznetsov <vkuznets@redhat.com>
 
@@ -51,10 +51,10 @@ Signed-off-by: Miroslav Rezanina <mrezanin@redhat.com>
  create mode 100644 tests/data/azure/pubkey_extract_ssh_key
 
 diff --git a/cloudinit/sources/DataSourceAzure.py b/cloudinit/sources/DataSourceAzure.py
-index 46d5744..4ebe6af 100644
+index 7dbeb04..2062ca5 100644
 --- a/cloudinit/sources/DataSourceAzure.py
 +++ b/cloudinit/sources/DataSourceAzure.py
-@@ -522,9 +522,11 @@ class DataSourceAzure(sources.DataSource):
+@@ -627,9 +627,11 @@ class DataSourceAzure(sources.DataSource):
          if self.ds_cfg['agent_command'] == AGENT_START_BUILTIN:
              self.bounce_network_with_azure_hostname()
  
@@ -67,7 +67,7 @@ index 46d5744..4ebe6af 100644
          else:
              metadata_func = self.get_metadata_from_agent
  
-@@ -537,6 +539,7 @@ class DataSourceAzure(sources.DataSource):
+@@ -642,6 +644,7 @@ class DataSourceAzure(sources.DataSource):
                  "Error communicating with Azure fabric; You may experience."
                  "connectivity issues.", exc_info=True)
              return False
@@ -75,7 +75,7 @@ index 46d5744..4ebe6af 100644
          util.del_file(REPORTED_READY_MARKER_FILE)
          util.del_file(REPROVISION_MARKER_FILE)
          return fabric_data
-@@ -807,13 +810,15 @@ def find_child(node, filter_func):
+@@ -909,13 +912,15 @@ def find_child(node, filter_func):
  def load_azure_ovf_pubkeys(sshnode):
      # This parses a 'SSH' node formatted like below, and returns
      # an array of dicts.
@@ -95,10 +95,10 @@ index 46d5744..4ebe6af 100644
      if len(results) == 0:
          return []
 diff --git a/cloudinit/sources/helpers/azure.py b/cloudinit/sources/helpers/azure.py
-index 90c12df..4b4f0e0 100644
+index e5696b1..2829dd2 100644
 --- a/cloudinit/sources/helpers/azure.py
 +++ b/cloudinit/sources/helpers/azure.py
-@@ -137,9 +137,36 @@ class OpenSSLManager(object):
+@@ -138,9 +138,36 @@ class OpenSSLManager(object):
              self.certificate = certificate
          LOG.debug('New certificate generated.')
  
@@ -138,7 +138,7 @@ index 90c12df..4b4f0e0 100644
          certificates_content = tag.text
          lines = [
              b'MIME-Version: 1.0',
-@@ -150,32 +177,30 @@ class OpenSSLManager(object):
+@@ -151,32 +178,30 @@ class OpenSSLManager(object):
              certificates_content.encode('utf-8'),
          ]
          with cd(self.tmpdir):
@@ -185,7 +185,7 @@ index 90c12df..4b4f0e0 100644
          return keys
  
  
-@@ -205,7 +230,6 @@ class WALinuxAgentShim(object):
+@@ -206,7 +231,6 @@ class WALinuxAgentShim(object):
          self.dhcpoptions = dhcp_options
          self._endpoint = None
          self.openssl_manager = None
@@ -193,7 +193,7 @@ index 90c12df..4b4f0e0 100644
          self.lease_file = fallback_lease_file
  
      def clean_up(self):
-@@ -327,8 +351,9 @@ class WALinuxAgentShim(object):
+@@ -328,8 +352,9 @@ class WALinuxAgentShim(object):
          LOG.debug('Azure endpoint found at %s', endpoint_ip_address)
          return endpoint_ip_address
  
@@ -205,7 +205,7 @@ index 90c12df..4b4f0e0 100644
          http_client = AzureEndpointHttpClient(self.openssl_manager.certificate)
          LOG.info('Registering with Azure...')
          attempts = 0
-@@ -346,16 +371,37 @@ class WALinuxAgentShim(object):
+@@ -347,16 +372,37 @@ class WALinuxAgentShim(object):
              attempts += 1
          LOG.debug('Successfully fetched GoalState XML.')
          goal_state = GoalState(response.contents, http_client)
@@ -250,7 +250,7 @@ index 90c12df..4b4f0e0 100644
  
      def _report_ready(self, goal_state, http_client):
          LOG.debug('Reporting ready to Azure fabric.')
-@@ -372,11 +418,12 @@ class WALinuxAgentShim(object):
+@@ -373,11 +419,12 @@ class WALinuxAgentShim(object):
          LOG.info('Reported ready to Azure fabric.')
  
  
@@ -460,7 +460,7 @@ index 0000000..54d749e
 @@ -0,0 +1 @@
 +ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDHU9IDclbKVYVbYuv0+zViX+wTwlKspslmy/uf3hkWLh7pyzyrq70S7qtSW2EGixUPxZS/R8pOLHoinlKF9ILgj0gVTCJsSwnWpXRg3rhZwIVoYMHN50BHS1SqVD0lsWNMXmo76LoJcjmWvwIznvj5C/gnhU+K7+c3m7AlCyU2wjwpBAEYj7PQs6l/wTqpEiaqC5NytNBd7qp+lYYysVrpa1PFL0Nj4MMZARIfjkiJtL9qDhy9YZeJRQ6q/Fhz0kjvkZnfxixfKF4yWzOfhBrAtpF6oOnuYKk3hxjh9KjTTX4/U8zdLojalX09iyHyEjwJKGlGEpzh1aY7t5btUyvp
 diff --git a/tests/unittests/test_datasource/test_azure_helper.py b/tests/unittests/test_datasource/test_azure_helper.py
-index b42b073..5eb26eb 100644
+index 26b2b93..0255616 100644
 --- a/tests/unittests/test_datasource/test_azure_helper.py
 +++ b/tests/unittests/test_datasource/test_azure_helper.py
 @@ -1,11 +1,13 @@
@@ -477,7 +477,7 @@ index b42b073..5eb26eb 100644
  from cloudinit.sources.helpers.azure import WALinuxAgentShim as wa_shim
  
  GOAL_STATE_TEMPLATE = """\
-@@ -287,6 +289,50 @@ class TestOpenSSLManager(CiTestCase):
+@@ -289,6 +291,50 @@ class TestOpenSSLManager(CiTestCase):
          self.assertEqual([mock.call(manager.tmpdir)], del_dir.call_args_list)
  
  
@@ -528,7 +528,7 @@ index b42b073..5eb26eb 100644
  class TestWALinuxAgentShim(CiTestCase):
  
      def setUp(self):
-@@ -327,18 +373,31 @@ class TestWALinuxAgentShim(CiTestCase):
+@@ -329,18 +375,31 @@ class TestWALinuxAgentShim(CiTestCase):
  
      def test_certificates_used_to_determine_public_keys(self):
          shim = wa_shim()

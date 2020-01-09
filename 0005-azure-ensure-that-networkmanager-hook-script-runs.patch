@@ -1,4 +1,4 @@
-From 06f283cfb7c632530fdd004f96cc8ba71325ebf3 Mon Sep 17 00:00:00 2001
+From 2ea5ccd14def513ced62a03a4b2ac14f58f28d32 Mon Sep 17 00:00:00 2001
 From: Lars Kellogg-Stedman <lars@redhat.com>
 Date: Thu, 15 Jun 2017 12:20:39 -0400
 Subject: azure: ensure that networkmanager hook script runs

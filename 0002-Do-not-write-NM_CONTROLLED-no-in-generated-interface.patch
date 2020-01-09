@@ -1,4 +1,4 @@
-From 6183f8a282703eaab967355a63fd5b116bb21f0b Mon Sep 17 00:00:00 2001
+From af85b22b99e3b784e982e4be11b2a39d79316265 Mon Sep 17 00:00:00 2001
 From: Miroslav Rezanina <mrezanin@redhat.com>
 Date: Thu, 31 May 2018 19:37:55 +0200
 Subject: Do not write NM_CONTROLLED=no in generated interface config  files
@@ -6,16 +6,15 @@ Subject: Do not write NM_CONTROLLED=no in generated interface config  files
 X-downstream-only: true
 Signed-off-by: Ryan McCabe <rmccabe@redhat.com>
 ---
- cloudinit/net/sysconfig.py                     |  1 -
- tests/unittests/test_distros/test_netconfig.py |  4 ----
- tests/unittests/test_net.py                    | 30 --------------------------
- 3 files changed, 35 deletions(-)
+ cloudinit/net/sysconfig.py  |  1 -
+ tests/unittests/test_net.py | 30 ------------------------------
+ 2 files changed, 31 deletions(-)
 
 diff --git a/cloudinit/net/sysconfig.py b/cloudinit/net/sysconfig.py
-index 39d89c4..cefb5c5 100644
+index 17293e1..ae0554e 100644
 --- a/cloudinit/net/sysconfig.py
 +++ b/cloudinit/net/sysconfig.py
-@@ -233,7 +233,6 @@ class Renderer(renderer.Renderer):
+@@ -250,7 +250,6 @@ class Renderer(renderer.Renderer):
      iface_defaults = tuple([
          ('ONBOOT', True),
          ('USERCTL', False),
@@ -23,47 +22,11 @@ index 39d89c4..cefb5c5 100644
          ('BOOTPROTO', 'none'),
      ])
  
-diff --git a/tests/unittests/test_distros/test_netconfig.py b/tests/unittests/test_distros/test_netconfig.py
-index 1c2e45f..2f69455 100644
---- a/tests/unittests/test_distros/test_netconfig.py
-+++ b/tests/unittests/test_distros/test_netconfig.py
-@@ -479,7 +479,6 @@ DEVICE=eth0
- GATEWAY=192.168.1.254
- IPADDR=192.168.1.5
- NETMASK=255.255.255.0
--NM_CONTROLLED=no
- ONBOOT=yes
- TYPE=Ethernet
- USERCTL=no
-@@ -496,7 +495,6 @@ USERCTL=no
- #
- BOOTPROTO=dhcp
- DEVICE=eth1
--NM_CONTROLLED=no
- ONBOOT=yes
- TYPE=Ethernet
- USERCTL=no
-@@ -630,7 +628,6 @@ DEVICE=eth0
- IPV6ADDR=2607:f0d0:1002:0011::2/64
- IPV6INIT=yes
- IPV6_DEFAULTGW=2607:f0d0:1002:0011::1
--NM_CONTROLLED=no
- ONBOOT=yes
- TYPE=Ethernet
- USERCTL=no
-@@ -645,7 +642,6 @@ USERCTL=no
- #
- BOOTPROTO=dhcp
- DEVICE=eth1
--NM_CONTROLLED=no
- ONBOOT=yes
- TYPE=Ethernet
- USERCTL=no
 diff --git a/tests/unittests/test_net.py b/tests/unittests/test_net.py
-index c12a487..95318ed 100644
+index 195f261..5f1aa3e 100644
 --- a/tests/unittests/test_net.py
 +++ b/tests/unittests/test_net.py
-@@ -144,7 +144,6 @@ GATEWAY=172.19.3.254
+@@ -175,7 +175,6 @@ GATEWAY=172.19.3.254
  HWADDR=fa:16:3e:ed:9a:59
  IPADDR=172.19.1.34
  NETMASK=255.255.252.0
@@ -71,7 +34,7 @@ index c12a487..95318ed 100644
  ONBOOT=yes
  TYPE=Ethernet
  USERCTL=no
-@@ -212,7 +211,6 @@ IPADDR=172.19.1.34
+@@ -279,7 +278,6 @@ IPADDR=172.19.1.34
  IPADDR1=10.0.0.10
  NETMASK=255.255.252.0
  NETMASK1=255.255.255.0
@@ -79,7 +42,7 @@ index c12a487..95318ed 100644
  ONBOOT=yes
  TYPE=Ethernet
  USERCTL=no
-@@ -302,7 +300,6 @@ IPV6ADDR_SECONDARIES="2001:DB9::10/64 2001:DB10::10/64"
+@@ -407,7 +405,6 @@ IPV6ADDR_SECONDARIES="2001:DB9::10/64 2001:DB10::10/64"
  IPV6INIT=yes
  IPV6_DEFAULTGW=2001:DB8::1
  NETMASK=255.255.252.0
@@ -87,7 +50,7 @@ index c12a487..95318ed 100644
  ONBOOT=yes
  TYPE=Ethernet
  USERCTL=no
-@@ -417,7 +414,6 @@ NETWORK_CONFIGS = {
+@@ -523,7 +520,6 @@ NETWORK_CONFIGS = {
                  BOOTPROTO=none
                  DEVICE=eth1
                  HWADDR=cf:d6:af:48:e8:80
@@ -95,15 +58,15 @@ index c12a487..95318ed 100644
                  ONBOOT=yes
                  TYPE=Ethernet
                  USERCTL=no"""),
-@@ -432,7 +428,6 @@ NETWORK_CONFIGS = {
-                 HWADDR=c0:d6:9f:2c:e8:80
+@@ -539,7 +535,6 @@ NETWORK_CONFIGS = {
                  IPADDR=192.168.21.3
                  NETMASK=255.255.255.0
+                 METRIC=10000
 -                NM_CONTROLLED=no
                  ONBOOT=yes
                  TYPE=Ethernet
                  USERCTL=no"""),
-@@ -544,7 +539,6 @@ NETWORK_CONFIGS = {
+@@ -652,7 +647,6 @@ NETWORK_CONFIGS = {
                  IPV6ADDR=2001:1::1/64
                  IPV6INIT=yes
                  NETMASK=255.255.255.0
@@ -111,7 +74,7 @@ index c12a487..95318ed 100644
                  ONBOOT=yes
                  TYPE=Ethernet
                  USERCTL=no
-@@ -745,14 +739,12 @@ pre-down route del -net 10.0.0.0 netmask 255.0.0.0 gw 11.0.0.1 metric 3 || true
+@@ -894,14 +888,12 @@ pre-down route del -net 10.0.0.0 netmask 255.0.0.0 gw 11.0.0.1 metric 3 || true
                  DHCPV6C=yes
                  IPV6INIT=yes
                  MACADDR=aa:bb:cc:dd:ee:ff
@@ -126,15 +89,15 @@ index c12a487..95318ed 100644
                  ONBOOT=yes
                  PHYSDEV=bond0
                  TYPE=Ethernet
-@@ -768,7 +760,6 @@ pre-down route del -net 10.0.0.0 netmask 255.0.0.0 gw 11.0.0.1 metric 3 || true
-                 IPV6INIT=yes
+@@ -918,7 +910,6 @@ pre-down route del -net 10.0.0.0 netmask 255.0.0.0 gw 11.0.0.1 metric 3 || true
                  IPV6_DEFAULTGW=2001:4800:78ff:1b::1
+                 MACADDR=bb:bb:bb:bb:bb:aa
                  NETMASK=255.255.255.0
 -                NM_CONTROLLED=no
                  ONBOOT=yes
                  PRIO=22
                  STP=no
-@@ -778,7 +769,6 @@ pre-down route del -net 10.0.0.0 netmask 255.0.0.0 gw 11.0.0.1 metric 3 || true
+@@ -928,7 +919,6 @@ pre-down route del -net 10.0.0.0 netmask 255.0.0.0 gw 11.0.0.1 metric 3 || true
                  BOOTPROTO=none
                  DEVICE=eth0
                  HWADDR=c0:d6:9f:2c:e8:80
@@ -142,7 +105,7 @@ index c12a487..95318ed 100644
                  ONBOOT=yes
                  TYPE=Ethernet
                  USERCTL=no"""),
-@@ -795,7 +785,6 @@ pre-down route del -net 10.0.0.0 netmask 255.0.0.0 gw 11.0.0.1 metric 3 || true
+@@ -945,7 +935,6 @@ pre-down route del -net 10.0.0.0 netmask 255.0.0.0 gw 11.0.0.1 metric 3 || true
                  MTU=1500
                  NETMASK=255.255.255.0
                  NETMASK1=255.255.255.0
@@ -150,7 +113,7 @@ index c12a487..95318ed 100644
                  ONBOOT=yes
                  PHYSDEV=eth0
                  TYPE=Ethernet
-@@ -806,7 +795,6 @@ pre-down route del -net 10.0.0.0 netmask 255.0.0.0 gw 11.0.0.1 metric 3 || true
+@@ -956,7 +945,6 @@ pre-down route del -net 10.0.0.0 netmask 255.0.0.0 gw 11.0.0.1 metric 3 || true
                  DEVICE=eth1
                  HWADDR=aa:d6:9f:2c:e8:80
                  MASTER=bond0
@@ -158,7 +121,7 @@ index c12a487..95318ed 100644
                  ONBOOT=yes
                  SLAVE=yes
                  TYPE=Ethernet
-@@ -816,7 +804,6 @@ pre-down route del -net 10.0.0.0 netmask 255.0.0.0 gw 11.0.0.1 metric 3 || true
+@@ -966,7 +954,6 @@ pre-down route del -net 10.0.0.0 netmask 255.0.0.0 gw 11.0.0.1 metric 3 || true
                  DEVICE=eth2
                  HWADDR=c0:bb:9f:2c:e8:80
                  MASTER=bond0
@@ -166,7 +129,7 @@ index c12a487..95318ed 100644
                  ONBOOT=yes
                  SLAVE=yes
                  TYPE=Ethernet
-@@ -826,7 +813,6 @@ pre-down route del -net 10.0.0.0 netmask 255.0.0.0 gw 11.0.0.1 metric 3 || true
+@@ -976,7 +963,6 @@ pre-down route del -net 10.0.0.0 netmask 255.0.0.0 gw 11.0.0.1 metric 3 || true
                  BRIDGE=br0
                  DEVICE=eth3
                  HWADDR=66:bb:9f:2c:e8:80
@@ -174,7 +137,7 @@ index c12a487..95318ed 100644
                  ONBOOT=yes
                  TYPE=Ethernet
                  USERCTL=no"""),
-@@ -835,7 +821,6 @@ pre-down route del -net 10.0.0.0 netmask 255.0.0.0 gw 11.0.0.1 metric 3 || true
+@@ -985,7 +971,6 @@ pre-down route del -net 10.0.0.0 netmask 255.0.0.0 gw 11.0.0.1 metric 3 || true
                  BRIDGE=br0
                  DEVICE=eth4
                  HWADDR=98:bb:9f:2c:e8:80
@@ -182,7 +145,7 @@ index c12a487..95318ed 100644
                  ONBOOT=yes
                  TYPE=Ethernet
                  USERCTL=no"""),
-@@ -843,7 +828,6 @@ pre-down route del -net 10.0.0.0 netmask 255.0.0.0 gw 11.0.0.1 metric 3 || true
+@@ -993,7 +978,6 @@ pre-down route del -net 10.0.0.0 netmask 255.0.0.0 gw 11.0.0.1 metric 3 || true
                  BOOTPROTO=dhcp
                  DEVICE=eth5
                  HWADDR=98:bb:9f:2c:e8:8a
@@ -190,15 +153,15 @@ index c12a487..95318ed 100644
                  ONBOOT=no
                  TYPE=Ethernet
                  USERCTL=no""")
-@@ -1125,7 +1109,6 @@ pre-down route del -net 10.0.0.0 netmask 255.0.0.0 gw 11.0.0.1 metric 3 || true
-         IPV6INIT=yes
+@@ -1356,7 +1340,6 @@ pre-down route del -net 10.0.0.0 netmask 255.0.0.0 gw 11.0.0.1 metric 3 || true
+         MTU=9000
          NETMASK=255.255.255.0
          NETMASK1=255.255.255.0
 -        NM_CONTROLLED=no
          ONBOOT=yes
          TYPE=Bond
          USERCTL=no
-@@ -1135,7 +1118,6 @@ pre-down route del -net 10.0.0.0 netmask 255.0.0.0 gw 11.0.0.1 metric 3 || true
+@@ -1366,7 +1349,6 @@ pre-down route del -net 10.0.0.0 netmask 255.0.0.0 gw 11.0.0.1 metric 3 || true
          DEVICE=bond0s0
          HWADDR=aa:bb:cc:dd:e8:00
          MASTER=bond0
@@ -206,7 +169,7 @@ index c12a487..95318ed 100644
          ONBOOT=yes
          SLAVE=yes
          TYPE=Ethernet
-@@ -1153,7 +1135,6 @@ pre-down route del -net 10.0.0.0 netmask 255.0.0.0 gw 11.0.0.1 metric 3 || true
+@@ -1388,7 +1370,6 @@ pre-down route del -net 10.0.0.0 netmask 255.0.0.0 gw 11.0.0.1 metric 3 || true
          DEVICE=bond0s1
          HWADDR=aa:bb:cc:dd:e8:01
          MASTER=bond0
@@ -214,7 +177,7 @@ index c12a487..95318ed 100644
          ONBOOT=yes
          SLAVE=yes
          TYPE=Ethernet
-@@ -1190,7 +1171,6 @@ pre-down route del -net 10.0.0.0 netmask 255.0.0.0 gw 11.0.0.1 metric 3 || true
+@@ -1426,7 +1407,6 @@ pre-down route del -net 10.0.0.0 netmask 255.0.0.0 gw 11.0.0.1 metric 3 || true
                  BOOTPROTO=none
                  DEVICE=en0
                  HWADDR=aa:bb:cc:dd:e8:00
@@ -222,15 +185,15 @@ index c12a487..95318ed 100644
                  ONBOOT=yes
                  TYPE=Ethernet
                  USERCTL=no"""),
-@@ -1206,7 +1186,6 @@ pre-down route del -net 10.0.0.0 netmask 255.0.0.0 gw 11.0.0.1 metric 3 || true
-                 IPV6_DEFAULTGW=2001:1::1
+@@ -1443,7 +1423,6 @@ pre-down route del -net 10.0.0.0 netmask 255.0.0.0 gw 11.0.0.1 metric 3 || true
+                 MTU=2222
                  NETMASK=255.255.255.0
                  NETMASK1=255.255.255.0
 -                NM_CONTROLLED=no
                  ONBOOT=yes
                  PHYSDEV=en0
                  TYPE=Ethernet
-@@ -1247,7 +1226,6 @@ pre-down route del -net 10.0.0.0 netmask 255.0.0.0 gw 11.0.0.1 metric 3 || true
+@@ -1484,7 +1463,6 @@ pre-down route del -net 10.0.0.0 netmask 255.0.0.0 gw 11.0.0.1 metric 3 || true
                  DEVICE=br0
                  IPADDR=192.168.2.2
                  NETMASK=255.255.255.0
@@ -238,7 +201,7 @@ index c12a487..95318ed 100644
                  ONBOOT=yes
                  PRIO=22
                  STP=no
-@@ -1261,7 +1239,6 @@ pre-down route del -net 10.0.0.0 netmask 255.0.0.0 gw 11.0.0.1 metric 3 || true
+@@ -1498,7 +1476,6 @@ pre-down route del -net 10.0.0.0 netmask 255.0.0.0 gw 11.0.0.1 metric 3 || true
                  HWADDR=52:54:00:12:34:00
                  IPV6ADDR=2001:1::100/96
                  IPV6INIT=yes
@@ -246,7 +209,7 @@ index c12a487..95318ed 100644
                  ONBOOT=yes
                  TYPE=Ethernet
                  USERCTL=no
-@@ -1273,7 +1250,6 @@ pre-down route del -net 10.0.0.0 netmask 255.0.0.0 gw 11.0.0.1 metric 3 || true
+@@ -1510,7 +1487,6 @@ pre-down route del -net 10.0.0.0 netmask 255.0.0.0 gw 11.0.0.1 metric 3 || true
                  HWADDR=52:54:00:12:34:01
                  IPV6ADDR=2001:1::101/96
                  IPV6INIT=yes
@@ -254,7 +217,7 @@ index c12a487..95318ed 100644
                  ONBOOT=yes
                  TYPE=Ethernet
                  USERCTL=no
-@@ -1347,7 +1323,6 @@ pre-down route del -net 10.0.0.0 netmask 255.0.0.0 gw 11.0.0.1 metric 3 || true
+@@ -1584,7 +1560,6 @@ pre-down route del -net 10.0.0.0 netmask 255.0.0.0 gw 11.0.0.1 metric 3 || true
                  HWADDR=52:54:00:12:34:00
                  IPADDR=192.168.1.2
                  NETMASK=255.255.255.0
@@ -262,7 +225,7 @@ index c12a487..95318ed 100644
                  ONBOOT=no
                  TYPE=Ethernet
                  USERCTL=no
-@@ -1357,7 +1332,6 @@ pre-down route del -net 10.0.0.0 netmask 255.0.0.0 gw 11.0.0.1 metric 3 || true
+@@ -1594,7 +1569,6 @@ pre-down route del -net 10.0.0.0 netmask 255.0.0.0 gw 11.0.0.1 metric 3 || true
                  DEVICE=eth1
                  HWADDR=52:54:00:12:34:aa
                  MTU=1480
@@ -270,7 +233,7 @@ index c12a487..95318ed 100644
                  ONBOOT=yes
                  TYPE=Ethernet
                  USERCTL=no
-@@ -1366,7 +1340,6 @@ pre-down route del -net 10.0.0.0 netmask 255.0.0.0 gw 11.0.0.1 metric 3 || true
+@@ -1603,7 +1577,6 @@ pre-down route del -net 10.0.0.0 netmask 255.0.0.0 gw 11.0.0.1 metric 3 || true
                  BOOTPROTO=none
                  DEVICE=eth2
                  HWADDR=52:54:00:12:34:ff
@@ -278,7 +241,7 @@ index c12a487..95318ed 100644
                  ONBOOT=no
                  TYPE=Ethernet
                  USERCTL=no
-@@ -1639,7 +1612,6 @@ class TestSysConfigRendering(CiTestCase):
+@@ -1969,7 +1942,6 @@ class TestRhelSysConfigRendering(CiTestCase):
  BOOTPROTO=dhcp
  DEVICE=eth1000
  HWADDR=07-1C-C6-75-A4-BE
@@ -286,7 +249,7 @@ index c12a487..95318ed 100644
  ONBOOT=yes
  TYPE=Ethernet
  USERCTL=no
-@@ -1759,7 +1731,6 @@ GATEWAY=10.0.2.2
+@@ -2090,7 +2062,6 @@ GATEWAY=10.0.2.2
  HWADDR=52:54:00:12:34:00
  IPADDR=10.0.2.15
  NETMASK=255.255.255.0
@@ -294,7 +257,7 @@ index c12a487..95318ed 100644
  ONBOOT=yes
  TYPE=Ethernet
  USERCTL=no
-@@ -1780,7 +1751,6 @@ USERCTL=no
+@@ -2111,7 +2082,6 @@ USERCTL=no
  #
  BOOTPROTO=dhcp
  DEVICE=eth0

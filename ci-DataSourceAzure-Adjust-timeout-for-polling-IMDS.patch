@@ -1,0 +1,117 @@
+From 635dcbf5a4a5b060ebf417c66789c59ebb28c39f Mon Sep 17 00:00:00 2001
+From: Eduardo Otubo <otubo@redhat.com>
+Date: Wed, 15 May 2019 12:15:28 +0200
+Subject: [PATCH 4/5] DataSourceAzure: Adjust timeout for polling IMDS
+
+RH-Author: Eduardo Otubo <otubo@redhat.com>
+Message-id: <20190515121529.11191-5-otubo@redhat.com>
+Patchwork-id: 87883
+O-Subject: [rhel-7 cloud-init PATCHv2 4/5] DataSourceAzure: Adjust timeout for polling IMDS
+Bugzilla: 1687565
+RH-Acked-by: Vitaly Kuznetsov <vkuznets@redhat.com>
+RH-Acked-by: Mohammed Gamal <mgamal@redhat.com>
+
+From: Anh Vo <anhvo@microsoft.com>
+
+BZ: 1687565
+BRANCH: rhel7/master-18.5
+UPSTREAM: ab6621d8
+BREW: 21696239
+
+commit ab6621d849b24bb652243e88c79f6f3b446048d7
+Author: Anh Vo <anhvo@microsoft.com>
+Date:   Wed May 8 14:54:03 2019 +0000
+
+    DataSourceAzure: Adjust timeout for polling IMDS
+
+    If the IMDS primary server is not available, falling back to the
+    secondary server takes about 1s. The net result is that the
+    expected E2E time is slightly more than 1s. This change increases
+    the timeout to 2s to prevent the infinite loop of timeouts.
+
+Signed-off-by: Eduardo Otubo <otubo@redhat.com>
+Signed-off-by: Miroslav Rezanina <mrezanin@redhat.com>
+---
+ cloudinit/sources/DataSourceAzure.py          | 15 ++++++++++-----
+ tests/unittests/test_datasource/test_azure.py | 10 +++++++---
+ 2 files changed, 17 insertions(+), 8 deletions(-)
+
+diff --git a/cloudinit/sources/DataSourceAzure.py b/cloudinit/sources/DataSourceAzure.py
+index c827816..5baf8da 100755
+--- a/cloudinit/sources/DataSourceAzure.py
++++ b/cloudinit/sources/DataSourceAzure.py
+@@ -57,7 +57,12 @@ AZURE_CHASSIS_ASSET_TAG = '7783-7084-3265-9085-8269-3286-77'
+ REPROVISION_MARKER_FILE = "/var/lib/cloud/data/poll_imds"
+ REPORTED_READY_MARKER_FILE = "/var/lib/cloud/data/reported_ready"
+ AGENT_SEED_DIR = '/var/lib/waagent'
++
++# In the event where the IMDS primary server is not
++# available, it takes 1s to fallback to the secondary one
++IMDS_TIMEOUT_IN_SECONDS = 2
+ IMDS_URL = "http://169.254.169.254/metadata/"
++
+ PLATFORM_ENTROPY_SOURCE = "/sys/firmware/acpi/tables/OEM0"
+ 
+ # List of static scripts and network config artifacts created by
+@@ -582,9 +587,9 @@ class DataSourceAzure(sources.DataSource):
+                         return
+                     self._ephemeral_dhcp_ctx.clean_network()
+                 else:
+-                    return readurl(url, timeout=1, headers=headers,
+-                                   exception_cb=exc_cb, infinite=True,
+-                                   log_req_resp=False).contents
++                    return readurl(url, timeout=IMDS_TIMEOUT_IN_SECONDS,
++                                   headers=headers, exception_cb=exc_cb,
++                                   infinite=True, log_req_resp=False).contents
+             except UrlError:
+                 # Teardown our EphemeralDHCPv4 context on failure as we retry
+                 self._ephemeral_dhcp_ctx.clean_network()
+@@ -1291,8 +1296,8 @@ def _get_metadata_from_imds(retries):
+     headers = {"Metadata": "true"}
+     try:
+         response = readurl(
+-            url, timeout=1, headers=headers, retries=retries,
+-            exception_cb=retry_on_url_exc)
++            url, timeout=IMDS_TIMEOUT_IN_SECONDS, headers=headers,
++            retries=retries, exception_cb=retry_on_url_exc)
+     except Exception as e:
+         LOG.debug('Ignoring IMDS instance metadata: %s', e)
+         return {}
+diff --git a/tests/unittests/test_datasource/test_azure.py b/tests/unittests/test_datasource/test_azure.py
+index eacf225..bc8b42c 100644
+--- a/tests/unittests/test_datasource/test_azure.py
++++ b/tests/unittests/test_datasource/test_azure.py
+@@ -163,7 +163,8 @@ class TestGetMetadataFromIMDS(HttprettyTestCase):
+ 
+         m_readurl.assert_called_with(
+             self.network_md_url, exception_cb=mock.ANY,
+-            headers={'Metadata': 'true'}, retries=2, timeout=1)
++            headers={'Metadata': 'true'}, retries=2,
++            timeout=dsaz.IMDS_TIMEOUT_IN_SECONDS)
+ 
+     @mock.patch('cloudinit.url_helper.time.sleep')
+     @mock.patch(MOCKPATH + 'net.is_up')
+@@ -1789,7 +1790,8 @@ class TestAzureDataSourcePreprovisioning(CiTestCase):
+                                     headers={'Metadata': 'true',
+                                              'User-Agent':
+                                              'Cloud-Init/%s' % vs()
+-                                             }, method='GET', timeout=1,
++                                             }, method='GET',
++                                    timeout=dsaz.IMDS_TIMEOUT_IN_SECONDS,
+                                     url=full_url)])
+         self.assertEqual(m_dhcp.call_count, 2)
+         m_net.assert_any_call(
+@@ -1826,7 +1828,9 @@ class TestAzureDataSourcePreprovisioning(CiTestCase):
+                                     headers={'Metadata': 'true',
+                                              'User-Agent':
+                                              'Cloud-Init/%s' % vs()},
+-                                    method='GET', timeout=1, url=full_url)])
++                                    method='GET',
++                                    timeout=dsaz.IMDS_TIMEOUT_IN_SECONDS,
++                                    url=full_url)])
+         self.assertEqual(m_dhcp.call_count, 2)
+         m_net.assert_any_call(
+             broadcast='192.168.2.255', interface='eth9', ip='192.168.2.9',
+-- 
+1.8.3.1
+

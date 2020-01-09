@@ -81,7 +81,7 @@ def _resize_xfs(mount_point, devpth):
 
 
 def _resize_ufs(mount_point, devpth):
-    return ('growfs', devpth)
+    return ('growfs', '-y', devpth)
 
 
 def _resize_zfs(mount_point, devpth):
@@ -89,13 +89,11 @@ def _resize_zfs(mount_point, devpth):
 
 
 def _get_dumpfs_output(mount_point):
-    dumpfs_res, err = util.subp(['dumpfs', '-m', mount_point])
-    return dumpfs_res
+    return util.subp(['dumpfs', '-m', mount_point])[0]
 
 
 def _get_gpart_output(part):
-    gpart_res, err = util.subp(['gpart', 'show', part])
-    return gpart_res
+    return util.subp(['gpart', 'show', part])[0]
 
 
 def _can_skip_resize_ufs(mount_point, devpth):
@@ -113,7 +111,7 @@ def _can_skip_resize_ufs(mount_point, devpth):
         if not line.startswith('#'):
             newfs_cmd = shlex.split(line)
             opt_value = 'O:Ua:s:b:d:e:f:g:h:i:jk:m:o:'
-            optlist, args = getopt.getopt(newfs_cmd[1:], opt_value)
+            optlist, _args = getopt.getopt(newfs_cmd[1:], opt_value)
             for o, a in optlist:
                 if o == "-s":
                     cur_fs_sz = int(a)
@@ -199,6 +197,13 @@ def maybe_get_writable_device_path(devpath, info, log):
     if devpath.startswith('gpt/'):
         log.debug('We have a gpt label - just go ahead')
         return devpath
+    # Alternatively, our device could simply be a name as returned by gpart,
+    # such as da0p3
+    if not devpath.startswith('/dev/') and not os.path.exists(devpath):
+        fulldevpath = '/dev/' + devpath.lstrip('/')
+        log.debug("'%s' doesn't appear to be a valid device path. Trying '%s'",
+                  devpath, fulldevpath)
+        devpath = fulldevpath
 
     try:
         statret = os.stat(devpath)
@@ -251,6 +256,8 @@ def handle(name, cfg, _cloud, log, args):
     if fs_type == 'zfs':
         zpool = devpth.split('/')[0]
         devpth = util.get_device_info_from_zpool(zpool)
+        if not devpth:
+            return  # could not find device from zpool
         resize_what = zpool
 
     info = "dev=%s mnt_point=%s path=%s" % (devpth, mount_point, resize_what)

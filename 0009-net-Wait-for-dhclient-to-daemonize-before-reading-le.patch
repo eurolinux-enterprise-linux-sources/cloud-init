@@ -1,0 +1,295 @@
+From c1c6d0b586e5556a37b9b813afbb4e6a24921adf Mon Sep 17 00:00:00 2001
+From: Eduardo Otubo <otubo@redhat.com>
+Date: Wed, 23 Jan 2019 12:30:21 +0100
+Subject: net: Wait for dhclient to daemonize before reading lease file
+
+RH-Author: Eduardo Otubo <otubo@redhat.com>
+Message-id: <20190123123021.32708-1-otubo@redhat.com>
+Patchwork-id: 84095
+O-Subject: [RHEL-7.7 cloud-init PATCH] net: Wait for dhclient to daemonize before reading lease file
+Bugzilla: 1632967
+RH-Acked-by: Vitaly Kuznetsov <vkuznets@redhat.com>
+RH-Acked-by: Miroslav Rezanina <mrezanin@redhat.com>
+
+Bugzilla: https://bugzilla.redhat.com/show_bug.cgi?id=1632967
+Brew: https://bugzilla.redhat.com/show_bug.cgi?id=1632967
+Tested: Me and upstream
+
+commit fdadcb5fae51f4e6799314ab98e3aec56c79b17c
+Author: Jason Zions <jasonzio@microsoft.com>
+Date:   Tue Jan 15 21:37:17 2019 +0000
+
+    net: Wait for dhclient to daemonize before reading lease file
+
+    cloud-init uses dhclient to fetch the DHCP lease so it can extract
+    DHCP options.  dhclient creates the leasefile, then writes to it;
+    simply waiting for the leasefile to appear creates a race between
+    dhclient and cloud-init. Instead, wait for dhclient to be parented by
+    init. At that point, we know it has written to the leasefile, so it's
+    safe to copy the file and kill the process.
+
+    cloud-init creates a temporary directory in which to execute dhclient,
+    and deletes that directory after it has killed the process. If
+    cloud-init abandons waiting for dhclient to daemonize, it will still
+    attempt to delete the temporary directory, but will not report an
+    exception should that attempt fail.
+
+    LP: #1794399
+
+Signed-off-by: Eduardo Otubo <otubo@redhat.com>
+Signed-off-by: Miroslav Rezanina <mrezanin@redhat.com>
+---
+ cloudinit/net/dhcp.py              | 44 +++++++++++++++++++++++++++-----------
+ cloudinit/net/tests/test_dhcp.py   | 15 ++++++++++---
+ cloudinit/temp_utils.py            |  4 ++--
+ cloudinit/tests/test_temp_utils.py | 18 +++++++++++++++-
+ cloudinit/util.py                  | 16 +++++++++++++-
+ tests/unittests/test_util.py       |  6 ++++++
+ 6 files changed, 83 insertions(+), 20 deletions(-)
+
+diff --git a/cloudinit/net/dhcp.py b/cloudinit/net/dhcp.py
+index 0db991d..c98a97c 100644
+--- a/cloudinit/net/dhcp.py
++++ b/cloudinit/net/dhcp.py
+@@ -9,6 +9,7 @@ import logging
+ import os
+ import re
+ import signal
++import time
+ 
+ from cloudinit.net import (
+     EphemeralIPv4Network, find_fallback_nic, get_devicelist,
+@@ -127,7 +128,9 @@ def maybe_perform_dhcp_discovery(nic=None):
+     if not dhclient_path:
+         LOG.debug('Skip dhclient configuration: No dhclient command found.')
+         return []
+-    with temp_utils.tempdir(prefix='cloud-init-dhcp-', needs_exe=True) as tdir:
++    with temp_utils.tempdir(rmtree_ignore_errors=True,
++                            prefix='cloud-init-dhcp-',
++                            needs_exe=True) as tdir:
+         # Use /var/tmp because /run/cloud-init/tmp is mounted noexec
+         return dhcp_discovery(dhclient_path, nic, tdir)
+ 
+@@ -195,24 +198,39 @@ def dhcp_discovery(dhclient_cmd_path, interface, cleandir):
+            '-pf', pid_file, interface, '-sf', '/bin/true']
+     util.subp(cmd, capture=True)
+ 
+-    # dhclient doesn't write a pid file until after it forks when it gets a
+-    # proper lease response. Since cleandir is a temp directory that gets
+-    # removed, we need to wait for that pidfile creation before the
+-    # cleandir is removed, otherwise we get FileNotFound errors.
++    # Wait for pid file and lease file to appear, and for the process
++    # named by the pid file to daemonize (have pid 1 as its parent). If we
++    # try to read the lease file before daemonization happens, we might try
++    # to read it before the dhclient has actually written it. We also have
++    # to wait until the dhclient has become a daemon so we can be sure to
++    # kill the correct process, thus freeing cleandir to be deleted back
++    # up the callstack.
+     missing = util.wait_for_files(
+         [pid_file, lease_file], maxwait=5, naplen=0.01)
+     if missing:
+         LOG.warning("dhclient did not produce expected files: %s",
+                     ', '.join(os.path.basename(f) for f in missing))
+         return []
+-    pid_content = util.load_file(pid_file).strip()
+-    try:
+-        pid = int(pid_content)
+-    except ValueError:
+-        LOG.debug(
+-            "pid file contains non-integer content '%s'", pid_content)
+-    else:
+-        os.kill(pid, signal.SIGKILL)
++
++    ppid = 'unknown'
++    for _ in range(0, 1000):
++        pid_content = util.load_file(pid_file).strip()
++        try:
++            pid = int(pid_content)
++        except ValueError:
++            pass
++        else:
++            ppid = util.get_proc_ppid(pid)
++            if ppid == 1:
++                LOG.debug('killing dhclient with pid=%s', pid)
++                os.kill(pid, signal.SIGKILL)
++                return parse_dhcp_lease_file(lease_file)
++        time.sleep(0.01)
++
++    LOG.error(
++        'dhclient(pid=%s, parentpid=%s) failed to daemonize after %s seconds',
++        pid_content, ppid, 0.01 * 1000
++    )
+     return parse_dhcp_lease_file(lease_file)
+ 
+ 
+diff --git a/cloudinit/net/tests/test_dhcp.py b/cloudinit/net/tests/test_dhcp.py
+index cd3e732..79e8842 100644
+--- a/cloudinit/net/tests/test_dhcp.py
++++ b/cloudinit/net/tests/test_dhcp.py
+@@ -145,16 +145,20 @@ class TestDHCPDiscoveryClean(CiTestCase):
+               'subnet-mask': '255.255.255.0', 'routers': '192.168.2.1'}],
+             dhcp_discovery(dhclient_script, 'eth9', tmpdir))
+         self.assertIn(
+-            "pid file contains non-integer content ''", self.logs.getvalue())
++            "dhclient(pid=, parentpid=unknown) failed "
++            "to daemonize after 10.0 seconds",
++            self.logs.getvalue())
+         m_kill.assert_not_called()
+ 
++    @mock.patch('cloudinit.net.dhcp.util.get_proc_ppid')
+     @mock.patch('cloudinit.net.dhcp.os.kill')
+     @mock.patch('cloudinit.net.dhcp.util.wait_for_files')
+     @mock.patch('cloudinit.net.dhcp.util.subp')
+     def test_dhcp_discovery_run_in_sandbox_waits_on_lease_and_pid(self,
+                                                                   m_subp,
+                                                                   m_wait,
+-                                                                  m_kill):
++                                                                  m_kill,
++                                                                  m_getppid):
+         """dhcp_discovery waits for the presence of pidfile and dhcp.leases."""
+         tmpdir = self.tmp_dir()
+         dhclient_script = os.path.join(tmpdir, 'dhclient.orig')
+@@ -164,6 +168,7 @@ class TestDHCPDiscoveryClean(CiTestCase):
+         pidfile = self.tmp_path('dhclient.pid', tmpdir)
+         leasefile = self.tmp_path('dhcp.leases', tmpdir)
+         m_wait.return_value = [pidfile]  # Return the missing pidfile wait for
++        m_getppid.return_value = 1  # Indicate that dhclient has daemonized
+         self.assertEqual([], dhcp_discovery(dhclient_script, 'eth9', tmpdir))
+         self.assertEqual(
+             mock.call([pidfile, leasefile], maxwait=5, naplen=0.01),
+@@ -173,9 +178,10 @@ class TestDHCPDiscoveryClean(CiTestCase):
+             self.logs.getvalue())
+         m_kill.assert_not_called()
+ 
++    @mock.patch('cloudinit.net.dhcp.util.get_proc_ppid')
+     @mock.patch('cloudinit.net.dhcp.os.kill')
+     @mock.patch('cloudinit.net.dhcp.util.subp')
+-    def test_dhcp_discovery_run_in_sandbox(self, m_subp, m_kill):
++    def test_dhcp_discovery_run_in_sandbox(self, m_subp, m_kill, m_getppid):
+         """dhcp_discovery brings up the interface and runs dhclient.
+ 
+         It also returns the parsed dhcp.leases file generated in the sandbox.
+@@ -197,6 +203,7 @@ class TestDHCPDiscoveryClean(CiTestCase):
+         pid_file = os.path.join(tmpdir, 'dhclient.pid')
+         my_pid = 1
+         write_file(pid_file, "%d\n" % my_pid)
++        m_getppid.return_value = 1  # Indicate that dhclient has daemonized
+ 
+         self.assertItemsEqual(
+             [{'interface': 'eth9', 'fixed-address': '192.168.2.74',
+@@ -355,3 +362,5 @@ class TestEphemeralDhcpNoNetworkSetup(HttprettyTestCase):
+             self.assertEqual(fake_lease, lease)
+         # Ensure that dhcp discovery occurs
+         m_dhcp.called_once_with()
++
++# vi: ts=4 expandtab
+diff --git a/cloudinit/temp_utils.py b/cloudinit/temp_utils.py
+index c98a1b5..346276e 100644
+--- a/cloudinit/temp_utils.py
++++ b/cloudinit/temp_utils.py
+@@ -81,7 +81,7 @@ def ExtendedTemporaryFile(**kwargs):
+ 
+ 
+ @contextlib.contextmanager
+-def tempdir(**kwargs):
++def tempdir(rmtree_ignore_errors=False, **kwargs):
+     # This seems like it was only added in python 3.2
+     # Make it since its useful...
+     # See: http://bugs.python.org/file12970/tempdir.patch
+@@ -89,7 +89,7 @@ def tempdir(**kwargs):
+     try:
+         yield tdir
+     finally:
+-        shutil.rmtree(tdir)
++        shutil.rmtree(tdir, ignore_errors=rmtree_ignore_errors)
+ 
+ 
+ def mkdtemp(**kwargs):
+diff --git a/cloudinit/tests/test_temp_utils.py b/cloudinit/tests/test_temp_utils.py
+index ffbb92c..4a52ef8 100644
+--- a/cloudinit/tests/test_temp_utils.py
++++ b/cloudinit/tests/test_temp_utils.py
+@@ -2,8 +2,9 @@
+ 
+ """Tests for cloudinit.temp_utils"""
+ 
+-from cloudinit.temp_utils import mkdtemp, mkstemp
++from cloudinit.temp_utils import mkdtemp, mkstemp, tempdir
+ from cloudinit.tests.helpers import CiTestCase, wrap_and_call
++import os
+ 
+ 
+ class TestTempUtils(CiTestCase):
+@@ -98,4 +99,19 @@ class TestTempUtils(CiTestCase):
+         self.assertEqual('/fake/return/path', retval)
+         self.assertEqual([{'dir': '/run/cloud-init/tmp'}], calls)
+ 
++    def test_tempdir_error_suppression(self):
++        """test tempdir suppresses errors during directory removal."""
++
++        with self.assertRaises(OSError):
++            with tempdir(prefix='cloud-init-dhcp-') as tdir:
++                os.rmdir(tdir)
++                # As a result, the directory is already gone,
++                # so shutil.rmtree should raise OSError
++
++        with tempdir(rmtree_ignore_errors=True,
++                     prefix='cloud-init-dhcp-') as tdir:
++            os.rmdir(tdir)
++            # Since the directory is already gone, shutil.rmtree would raise
++            # OSError, but we suppress that
++
+ # vi: ts=4 expandtab
+diff --git a/cloudinit/util.py b/cloudinit/util.py
+index 7800f7b..a84112a 100644
+--- a/cloudinit/util.py
++++ b/cloudinit/util.py
+@@ -2861,7 +2861,6 @@ def mount_is_read_write(mount_point):
+     mount_opts = result[-1].split(',')
+     return mount_opts[0] == 'rw'
+ 
+-
+ def udevadm_settle(exists=None, timeout=None):
+     """Invoke udevadm settle with optional exists and timeout parameters"""
+     settle_cmd = ["udevadm", "settle"]
+@@ -2875,5 +2874,20 @@ def udevadm_settle(exists=None, timeout=None):
+ 
+     return subp(settle_cmd)
+ 
++def get_proc_ppid(pid):
++    """
++    Return the parent pid of a process.
++    """
++    ppid = 0
++    try:
++        contents = load_file("/proc/%s/stat" % pid, quiet=True)
++    except IOError as e:
++        LOG.warning('Failed to load /proc/%s/stat. %s', pid, e)
++    if contents:
++        parts = contents.split(" ", 4)
++        # man proc says
++        #  ppid %d     (4) The PID of the parent.
++        ppid = int(parts[3])
++    return ppid
+ 
+ # vi: ts=4 expandtab
+diff --git a/tests/unittests/test_util.py b/tests/unittests/test_util.py
+index 5a14479..8aebcd6 100644
+--- a/tests/unittests/test_util.py
++++ b/tests/unittests/test_util.py
+@@ -1114,6 +1114,12 @@ class TestLoadShellContent(helpers.TestCase):
+                 'key3="val3 #tricky"',
+                 ''])))
+ 
++    def test_get_proc_ppid(self):
++        """get_proc_ppid returns correct parent pid value."""
++        my_pid = os.getpid()
++        my_ppid = os.getppid()
++        self.assertEqual(my_ppid, util.get_proc_ppid(my_pid))
++
+ 
+ class TestGetProcEnv(helpers.TestCase):
+     """test get_proc_env."""
+-- 
+1.8.3.1
+

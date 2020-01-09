@@ -1,4 +1,4 @@
-From 29742cf728256aa041b122988b3ed3a5008d4ff3 Mon Sep 17 00:00:00 2001
+From 0101e1677a1ae5ba328657e0b060277707de3913 Mon Sep 17 00:00:00 2001
 From: Lars Kellogg-Stedman <lars@redhat.com>
 Date: Fri, 7 Apr 2017 18:50:54 -0400
 Subject: limit permissions on def_log_file
@@ -16,10 +16,10 @@ X-approved-upstream: true
  3 files changed, 7 insertions(+), 1 deletion(-)
 
 diff --git a/cloudinit/settings.py b/cloudinit/settings.py
-index a5a1eec..4efe6b6 100644
+index c536768..d982a4d 100644
 --- a/cloudinit/settings.py
 +++ b/cloudinit/settings.py
-@@ -42,6 +42,7 @@ CFG_BUILTIN = {
+@@ -43,6 +43,7 @@ CFG_BUILTIN = {
          'None',
      ],
      'def_log_file': '/var/log/cloud-init.log',
@@ -28,10 +28,10 @@ index a5a1eec..4efe6b6 100644
      'mount_default_fields': [None, None, 'auto', 'defaults,nofail', '0', '2'],
      'ssh_deletekeys': False,
 diff --git a/cloudinit/stages.py b/cloudinit/stages.py
-index bc4ebc8..40336e0 100644
+index 8a06412..4f15484 100644
 --- a/cloudinit/stages.py
 +++ b/cloudinit/stages.py
-@@ -145,8 +145,9 @@ class Init(object):
+@@ -148,8 +148,9 @@ class Init(object):
      def _initialize_filesystem(self):
          util.ensure_dirs(self._initial_subdirs())
          log_file = util.get_cfg_option_str(self.cfg, 'def_log_file')
@@ -43,10 +43,10 @@ index bc4ebc8..40336e0 100644
              if not perms:
                  perms = {}
 diff --git a/doc/examples/cloud-config.txt b/doc/examples/cloud-config.txt
-index bd84c64..99e6fdd 100644
+index eb84dcf..0e82b83 100644
 --- a/doc/examples/cloud-config.txt
 +++ b/doc/examples/cloud-config.txt
-@@ -397,10 +397,14 @@ timezone: US/Eastern
+@@ -413,10 +413,14 @@ timezone: US/Eastern
  # if syslog_fix_perms is a list, it will iterate through and use the
  # first pair that does not raise error.
  #
